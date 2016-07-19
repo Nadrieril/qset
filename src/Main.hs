@@ -8,7 +8,7 @@ import qualified Data.Map.Strict as M
 import Control.Monad
 import Control.Eff (Member, Eff, run, (:>))
 import Control.Eff.State.Strict (State, get, put, evalState)
-import Control.Eff.Writer.Strict (Writer, tell, runWriter)
+import Control.Eff.Writer.Strict (Writer, tell, runWriter, censor)
 
 main :: IO ()
 main = do
@@ -30,8 +30,8 @@ compile = intercalate ", " . map aux
 
 
 type M r e =
-    ( Member (Writer [Instr]) r
-    , Member (Writer [Var]) r
+    ( Member (Writer Instr) r
+    , Member (Writer Var) r
     , Member (State (M.Map String Int)) r
     ) => Eff r e
 
@@ -56,28 +56,28 @@ instance Monad (Blk r) where
         unBlk (bf x) lbl1
 
 
-runBlk :: Int -> Blk (State (M.Map String Int) :> Writer [Var] :> Writer [Instr] :> Void) () -> [Instr]
+runBlk :: Int -> Blk (State (M.Map String Int) :> Writer Var :> Writer Instr :> Void) () -> [Instr]
 runBlk ninputs b = run $
-    fmap fst $ runWriter (++) ([] :: [Instr]) $ do
+    fmap fst $ runWriter (:) ([] :: [Instr]) $ do
         (vars, (lstart, lend)) <-
-            runWriter (++) ([] :: [Var]) $
+            runWriter (:) ([] :: [Var]) $
             evalState M.empty $ do
                 lstart <- newLabelM
                 (lend, ()) <- unBlk b lstart
                 return (lstart, lend)
 
         -- clear variables and inputs
-        tell =<< forM vars (\v -> return $ [lend, v] :-> [lend])
-        tell =<< forM [0..ninputs-1] (\i -> return $ [lend, "i"++show i] :-> [lend])
-        tell [[lend] :-> []]
+        forM_ vars (\v -> tell $ [lend, v] :-> [lend])
+        forM_ [0..ninputs-1] (\i -> tell $ [lend, "i"++show i] :-> [lend])
+        tell $ [lend] :-> []
         -- Starting point
-        tell [["i0"] :-> ["i0", lstart]]
+        tell $ ["i0"] :-> ["i0", lstart]
         return ()
 
 
 
 (>>>) :: [Var] -> [Var] -> Blk r ()
-(>>>) l r = lift $ tell [l :-> r]
+(>>>) l r = lift $ tell $ l :-> r
 
 newLabelM :: M r Var
 newLabelM = do
@@ -95,7 +95,7 @@ newVar n = lift $ do
     let i = fromMaybe 0 $ M.lookup n m
     put $ M.insert n (i+1) m
     let v = n ++ show i
-    tell [v]
+    tell v
     return v
 
 crntLabel :: Blk r Var
@@ -104,8 +104,8 @@ crntLabel = Blk $ \lstart -> return (lstart, lstart)
 endLabel :: Var -> Blk r ()
 endLabel lend = Blk $ \_ -> return (lend, ())
 
-runAtLabel :: Var -> Blk r a -> M r (Var, a)
-runAtLabel = flip unBlk
+runBlkAtLabel :: Var -> Blk r a -> M r (Var, a)
+runBlkAtLabel = flip unBlk
 
 
 goto :: Var -> Blk r ()
@@ -114,11 +114,15 @@ goto lend = do
     [lstart] >>> [lend]
     endLabel lend
 
-tellAtLabel :: Instr -> Blk r ()
-tellAtLabel (l :-> r) = do
-    lstart <- crntLabel
-    (lstart:l) >>> (lstart:r)
+ifLabel :: Var -> Blk r a -> Blk r a
+ifLabel lbl b =
+    let prepend lbl (l :-> r) = (lbl:l) :-> (lbl:r) in
+    Blk $ censor (prepend lbl) . unBlk b
 
+atCrntLabel :: Blk r a -> Blk r a
+atCrntLabel b = do
+    lstart <- crntLabel
+    ifLabel lstart b
 
 ifz :: Var -> Blk r () -> Blk r () -> Blk r ()
 ifz x b1 b2 = do
@@ -127,8 +131,8 @@ ifz x b1 b2 = do
     lstart <- crntLabel
     [lstart, x] >>> [x, lbl2]
     [lstart] >>> [lbl1]
-    (lend::Var, ()) <- lift $ runAtLabel lbl1 b1
-    (_   ::Var, ()) <- lift $ runAtLabel lbl2 (b2 >> goto lend)
+    (lend::Var, ()) <- lift $ runBlkAtLabel lbl1 b1
+    (_   ::Var, ()) <- lift $ runBlkAtLabel lbl2 (b2 >> goto lend)
     endLabel lend
 
 whennz :: Var -> Blk r () -> Blk r ()
@@ -138,20 +142,16 @@ whenz :: Var -> Blk r () -> Blk r ()
 whenz x = flip (ifz x) (return ())
 
 
-clear :: Var -> Blk r ()
-clear x = do
-    tellAtLabel $ [x] :-> []
-    newLabel >>= goto
-
 fork :: Var -> [Var] -> Blk r ()
 fork x ys = do
-    tellAtLabel $ [x] :-> ys
+    atCrntLabel $ [x] >>> ys
     newLabel >>= goto
 
+clear :: Var -> Blk r ()
+clear x = fork x []
+
 move :: Var -> Var -> Blk r ()
-move x y = do
-    tellAtLabel $ [x] :-> [y]
-    newLabel >>= goto
+move x y = fork x [y]
 
 copy :: Var -> [Var] -> Blk r ()
 copy x ys = do
@@ -187,7 +187,7 @@ add x y z = do
 
 sub :: Var -> Var -> [Var] -> Blk r ()
 sub x y res = do
-    tellAtLabel $ [x, y] :-> res
+    atCrntLabel $ [x, y] >>> res
     newLabel >>= goto
 
 prod :: Var -> Var -> Var -> Blk r ()
