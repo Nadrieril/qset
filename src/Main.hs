@@ -24,8 +24,14 @@ instance Show Instr where
     show (l :-> r) = unwords l ++ " > " ++ unwords r
 
 compile :: [Instr] -> String
-compile = intercalate ", " . map aux
-    where aux (l :-> r) = unwords r ++ "/" ++ unwords l
+compile instrs = intercalate "," $ map aux instrs
+    where
+        varcount :: M.Map Var Int
+        varcount = foldr (\(l :-> r) m -> foldr (M.alter $ Just . maybe 0 (+1)) m (l++r)) M.empty instrs
+        vars = map snd $ sort $ map (\(a,b)->(b,a)) $ M.toList varcount
+        varmap = M.fromList $ zip vars (map (:[]) ['a'..])
+        lookupvar v = fromMaybe v $ M.lookup v varmap
+        aux (l :-> r) = unwords (map lookupvar r) ++ "/" ++ unwords (map lookupvar l)
 
 
 
