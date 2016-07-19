@@ -2,10 +2,11 @@
 module Main where
 
 import Data.List
+import Data.Void (Void)
 import Control.Monad
-import Control.Monad.Effect (Effect, runEffect, Row(..))
-import Control.Effect.Writer (EffectWriter, Writer, runWriter, tell, censor)
-import Control.Effect.State (EffectState, State, runState, put, get)
+import Control.Eff (Member, Eff, run, (:>))
+import Control.Eff.State.Strict (State, get, put, runState)
+import Control.Eff.Writer.Strict (Writer, tell, runWriter)
 
 main :: IO ()
 main = do
@@ -27,9 +28,9 @@ compile = intercalate ", " . map aux
 
 
 type M r e =
-    ( EffectWriter [Instr] r
-    , EffectState (Int, Int) r
-    ) => Effect r e
+    ( Member (Writer [Instr]) r
+    , Member (State (Int, Int)) r
+    ) => Eff r e
 
 data Blk r a = Blk { unBlk :: Var -> M r (Var, a) }
     deriving (Functor)
@@ -52,10 +53,10 @@ instance Monad (Blk r) where
         unBlk (bf x) lbl1
 
 
-runBlk :: Int -> Blk (State (Int, Int) :+ Writer [Instr] :+ Nil) () -> [Instr]
-runBlk ninputs b = runEffect $
-    fmap snd $ runWriter $ do
-        ((lstart, lend), (lastvar, _)) <- runState (0::Int, 0::Int) $ do
+runBlk :: Int -> Blk (State (Int, Int) :> Writer [Instr] :> Void) () -> [Instr]
+runBlk ninputs b = run $
+    fmap fst $ runWriter (++) ([] :: [Instr]) $ do
+        ((lastvar, _), (lstart, lend)) <- runState (0::Int, 0::Int) $ do
             lstart <- newLabelM
             (lend, ()) <- unBlk b lstart
             return (lstart, lend)
