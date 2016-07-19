@@ -2,10 +2,12 @@
 module Main where
 
 import Data.List
+import Data.Maybe
 import Data.Void (Void)
+import qualified Data.Map.Strict as M
 import Control.Monad
 import Control.Eff (Member, Eff, run, (:>))
-import Control.Eff.State.Strict (State, get, put, runState)
+import Control.Eff.State.Strict (State, get, put, evalState)
 import Control.Eff.Writer.Strict (Writer, tell, runWriter)
 
 main :: IO ()
@@ -29,7 +31,8 @@ compile = intercalate ", " . map aux
 
 type M r e =
     ( Member (Writer [Instr]) r
-    , Member (State (Int, Int)) r
+    , Member (Writer [Var]) r
+    , Member (State (M.Map String Int)) r
     ) => Eff r e
 
 data Blk r a = Blk { unBlk :: Var -> M r (Var, a) }
@@ -53,16 +56,18 @@ instance Monad (Blk r) where
         unBlk (bf x) lbl1
 
 
-runBlk :: Int -> Blk (State (Int, Int) :> Writer [Instr] :> Void) () -> [Instr]
+runBlk :: Int -> Blk (State (M.Map String Int) :> Writer [Var] :> Writer [Instr] :> Void) () -> [Instr]
 runBlk ninputs b = run $
     fmap fst $ runWriter (++) ([] :: [Instr]) $ do
-        ((lastvar, _), (lstart, lend)) <- runState (0::Int, 0::Int) $ do
-            lstart <- newLabelM
-            (lend, ()) <- unBlk b lstart
-            return (lstart, lend)
+        (vars, (lstart, lend)) <-
+            runWriter (++) ([] :: [Var]) $
+            evalState M.empty $ do
+                lstart <- newLabelM
+                (lend, ()) <- unBlk b lstart
+                return (lstart, lend)
 
         -- clear variables and inputs
-        tell =<< forM [0..lastvar]   (\i -> return $ [lend, "x"++show i] :-> [lend])
+        tell =<< forM vars (\v -> return $ [lend, v] :-> [lend])
         tell =<< forM [0..ninputs-1] (\i -> return $ [lend, "i"++show i] :-> [lend])
         tell [[lend] :-> []]
         -- Starting point
@@ -76,18 +81,22 @@ runBlk ninputs b = run $
 
 newLabelM :: M r Var
 newLabelM = do
-    (i::Int, j::Int) <- get
-    put (i, j+1)
-    return $ "l" ++ show j
+    m :: M.Map String Int <- get
+    let i = fromMaybe 0 $ M.lookup "l" m
+    put $ M.insert "l" (i+1) m
+    return $ "l" ++ show i
 
 newLabel :: Blk r Var
 newLabel = lift newLabelM
 
-newVar :: Blk r Var
-newVar = lift $ do
-    (i::Int, j::Int) <- get
-    put (i+1, j)
-    return $ "x" ++ show i
+newVar :: String -> Blk r Var
+newVar n = lift $ do
+    m :: M.Map String Int <- get
+    let i = fromMaybe 0 $ M.lookup n m
+    put $ M.insert n (i+1) m
+    let v = n ++ show i
+    tell [v]
+    return v
 
 crntLabel :: Blk r Var
 crntLabel = Blk $ \lstart -> return (lstart, lstart)
@@ -146,7 +155,7 @@ move x y = do
 
 copy :: Var -> [Var] -> Blk r ()
 copy x ys = do
-    tmp <- newVar
+    tmp <- newVar "copy"
     fork x (tmp:ys)
     move tmp x
 
@@ -203,10 +212,10 @@ euclDiv a b q r = whennz b $ do
 
 sqrt_ :: Var -> Var -> Blk r ()
 sqrt_ x r = do
-    -- t <- newVar
-    -- y <- newVar
-    -- tmp <- newVar
-    let (t, y, tmp, tmp2) = ("t", "y", "tmp", "tmp2")
+    t <- newVar "t"
+    y <- newVar "y"
+    tmp <- newVar "tmp"
+    tmp2 <- newVar "tmp"
     incr t
     incr x
     lstart <- crntLabel

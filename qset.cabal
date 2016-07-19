@@ -19,3 +19,4 @@ executable qset
   build-depends:
       base >= 4.7 && < 5
     , extensible-effects
+    , containers
