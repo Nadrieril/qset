@@ -17,6 +17,7 @@ main :: IO ()
 main = do
     let instrs = runBlk 2 prog
     forM_ instrs print
+    -- putStrLn ""
     -- putStrLn $ compile instrs
 
 
@@ -122,23 +123,17 @@ euclDiv a b q r = whennz b $ do
 sqrt_ :: Var -> Var -> Blk r ()
 sqrt_ x r = do
     t <- newVar "t"
-    y <- newVar "y"
-    tmp <- newVar "tmp"
-    tmp2 <- newVar "tmp"
+    z <- newVar "z"
     incr t
     incr x
     lstart <- crntLabel
+    sub x z []
     whennz x $ do
+        incr t
+        incr r
+        copy t [z]
+        incr t
         decr x
-        copy t [tmp]
-        sub y tmp [tmp2]
-        incr y
-        ifz tmp
-            (do clear tmp2
-                incr r
-                incr2 t)
-            (do clear tmp
-                move tmp2 y)
         goto lstart
 
 

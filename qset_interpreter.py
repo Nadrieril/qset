@@ -68,7 +68,7 @@ def interpret(program, input, maxsteps=100):
         while True:
             if step==maxsteps:
                 raise Exception("Too many execution steps!")
-            print_qset(qset.qset)
+            # print_qset(qset.qset)
             ret = interpret_step(program, qset)
             if ret:
                 break
@@ -81,8 +81,6 @@ def interpret(program, input, maxsteps=100):
                     idx = key[1:]
                     idx = int(idx)
                     outputs[idx] = qset.qset[key]
-                # else:
-                #     success = False
             else:
                 success = False
         if success:
@@ -92,7 +90,7 @@ def interpret(program, input, maxsteps=100):
                     outputs_arr.append(outputs[x])
                 else:
                     raise Exception("Invalid output!")
-            return outputs_arr
+            return outputs_arr, step
         else:
             raise Exception("Invalid output!")
     except Exception as e:
@@ -130,20 +128,20 @@ prog = sys.stdin.read()
 prog = ",".join([convert(x) for x in prog.strip().split('\n')])
 print(prog)
 
-print(interpret(prog, list(map(int, sys.argv[1:])), 1000))
+print(interpret(prog, list(map(int, sys.argv[1:])), 10000))
 
 # def sqrt(x):
 #     s = 0
 #     t = 1
-#     y = 0
+#     z = 1
 #     x += 1
 #     while x > 0:
 #         x -= 1
-#         y += 1
-#         if y > t:
-#             y -= t
+#         if z == 0:
 #             t += 2
+#             z += t
 #             s += 1
+#         z -= 1
 #     return s
 #
 # for i in range(10+1):
