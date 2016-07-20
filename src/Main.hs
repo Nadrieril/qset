@@ -27,6 +27,12 @@ goto :: Var -> Blk r ()
 goto lend = do
     lstart <- crntLabel
     [lstart] >>> [lend]
+    newLabel >>= endLabel
+
+changeLabel :: Var -> Blk r ()
+changeLabel lend = do
+    lstart <- crntLabel
+    [lstart] >>> [lend]
     endLabel lend
 
 atCrntLabel :: Blk r a -> Blk r a
@@ -56,7 +62,7 @@ whenz x = flip (ifz x) (return ())
 fork :: Var -> [Var] -> Blk r ()
 fork x ys = do
     atCrntLabel $ [x] >>> ys
-    newLabel >>= goto
+    newLabel >>= changeLabel
 
 clear :: Var -> Blk r ()
 clear x = do
@@ -89,7 +95,7 @@ decr x = do
     lstart <- crntLabel
     lend <- newLabel
     [lstart, x] >>> [lend]
-    goto lend
+    changeLabel lend
 
 add :: Var -> Var -> Var -> Blk r ()
 add x y z = do
@@ -101,13 +107,13 @@ min_ :: Var -> Var -> [Var] -> Blk r ()
 min_ x y res = do
     comment $ printf "min_ %s %s %s" x y (show res)
     atCrntLabel $ [x, y] >>> res
-    newLabel >>= goto
+    newLabel >>= changeLabel
 
 sub :: Var -> Var -> Blk r ()
 sub x y = do
     comment $ printf "sub %s %s" x y
     atCrntLabel $ [x, y] >>> []
-    newLabel >>= goto
+    newLabel >>= changeLabel
 
 prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
