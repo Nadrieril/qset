@@ -146,3 +146,47 @@ print(interpret(prog, list(map(int, sys.argv[1:])), 100000))
 #
 # for i in range(10+1):
 #     print(sqrt(i*i))
+
+# def ecldiv(a, b):
+#     return (a // b, a % b)
+#
+# def sub(a, b):
+#     return (a - min(a, b), b - min(a, b))
+#
+# def bezout(a, b):
+#     r0=a
+#     r1=b
+#     s0=1
+#     s1=0
+#     t0=0
+#     t1=1
+#     while r1 != 0:
+#         tmp0 = r1
+#         (q, r) = ecldiv(r0, r1)
+#         r0 = tmp0
+#         r1 = r
+#         q_ = q
+#
+#         tmp1 = s1
+#         tmp0 = s1*q
+#         (s0, tmp0) = sub(s0, tmp0)
+#         nincr = 0
+#         while tmp0 > 0:
+#             s0 = b
+#             (tmp0, s0) = sub(tmp0, s0)
+#             # nincr += 1
+#
+#         s1 = s0
+#         s0 = tmp1
+#
+#         # (t0, t1) = (t1, t0 - nincr*a - q*t1)
+#     return s0
+#
+# print(bezout(5, 12)) # -> 5
+# print()
+# print(bezout(5, 156816)) # -> 125453
+# print()
+# print(bezout(11, 32)) # -> 3
+# print()
+# print(bezout(13, 40)) # -> 37
+# print()

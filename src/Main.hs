@@ -147,8 +147,63 @@ sqrt_ x r = do
         goto lstart
 
 
+submod :: Var -> Var -> Var -> Blk r ()
+submod x y n = do
+    comment $ printf "submod %s %s %s" x y n
+    sub x y
+    lbl1 <- crntLabel
+    tmp <- newVar "cp"
+    whennz y $ do
+        clear x
+        atCrntLabel $ [n, y] >>> [tmp]
+        atCrntLabel $ [n] >>> [tmp, x]
+        newLabel >>= goto
+        move tmp n
+        goto lbl1
+    newLabel >>= goto
+
+bezout :: Var -> Var -> Var -> Blk r ()
+bezout a b s0 = do
+    [q, r0, r1, r, _, s1, tmp0] <- mapM newVar
+        ["q", "r", "r", "r", "s", "s", "tmp"]
+    move a r0
+    copy b [r1]
+    incr s0
+    lstart <- crntLabel
+    comment "main loop"
+    whennz r1 $ do
+        copy r1 [tmp0]
+        comment "euclDiv r0 r1 q r"
+        euclDiv r0 r1 q r
+        clear r0
+        move tmp0 r0
+        clear r1
+        move r r1
+
+        prod s1 q tmp0
+
+        submod s0 tmp0 b
+
+        move s1 tmp0
+        move s0 s1
+        move tmp0 s0
+
+        goto lstart
+    comment "cleanup"
+
+
+
 prog :: Blk r ()
 -- prog = prod "i0" "i1" "o0"
 -- prog = copy "x" ["y", "z"]
 -- prog = euclDiv "i0" "i1" "o0" "o1"
-prog = sqrt_ "i0" "o0"
+-- prog = sqrt_ "i0" "o0"
+prog = bezout "i0" "i1" "o0"
+
+-- [397, 397, 5] -> 125453
+-- [3, 7, 5] -> 5
+
+-- [5, 156816] -> 125453
+-- [5, 12] -> 5
+-- [11, 32] -> 3
+-- [13, 40] -> 37
