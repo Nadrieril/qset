@@ -97,9 +97,16 @@ add x y z = do
     move x z
     move y z
 
-sub :: Var -> Var -> [Var] -> Blk r ()
-sub x y res = do
+min_ :: Var -> Var -> [Var] -> Blk r ()
+min_ x y res = do
+    comment $ printf "min_ %s %s %s" x y (show res)
     atCrntLabel $ [x, y] >>> res
+    newLabel >>= goto
+
+sub :: Var -> Var -> Blk r ()
+sub x y = do
+    comment $ printf "sub %s %s" x y
+    atCrntLabel $ [x, y] >>> []
     newLabel >>= goto
 
 prod :: Var -> Var -> Var -> Blk r ()
@@ -114,7 +121,7 @@ prod x y z = do
 euclDiv :: Var -> Var -> Var -> Var -> Blk r ()
 euclDiv a b q r = whennz b $ do
     lstart <- crntLabel
-    sub a b [r]
+    min_ a b [r]
     ifz a
         (whenz b $ do
             incr q
@@ -130,7 +137,7 @@ sqrt_ x r = do
     incr t
     incr x
     lstart <- crntLabel
-    sub x z []
+    sub x z
     whennz x $ do
         incr t
         incr r
