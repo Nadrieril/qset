@@ -106,11 +106,11 @@ newVar n = lift $ do
     tell v
     return v
 
-crntLabel :: Blk r Var
-crntLabel = Blk $ \lstart -> return (lstart, lstart)
+getLabel :: Blk r Var
+getLabel = Blk $ \lstart -> return (lstart, lstart)
 
-endLabel :: Var -> Blk r ()
-endLabel lend = Blk $ \_ -> return (lend, ())
+setLabel :: Var -> Blk r ()
+setLabel lend = Blk $ \_ -> return (lend, ())
 
 runBlkAtLabel :: Var -> Blk r a -> M r (Var, a)
 runBlkAtLabel = flip unBlk

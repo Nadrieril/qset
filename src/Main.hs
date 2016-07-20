@@ -25,19 +25,19 @@ main = do
 
 goto :: Var -> Blk r ()
 goto lend = do
-    lstart <- crntLabel
+    lstart <- getLabel
     [lstart] >>> [lend]
-    newLabel >>= endLabel
+    newLabel >>= setLabel
 
 changeLabel :: Var -> Blk r ()
 changeLabel lend = do
-    lstart <- crntLabel
+    lstart <- getLabel
     [lstart] >>> [lend]
-    endLabel lend
+    setLabel lend
 
 atCrntLabel :: Blk r a -> Blk r a
 atCrntLabel b = do
-    lstart <- crntLabel
+    lstart <- getLabel
     ifLabel lstart b
 
 
@@ -45,12 +45,12 @@ ifz :: Var -> Blk r () -> Blk r () -> Blk r ()
 ifz x b1 b2 = do
     lbl1 <- newLabel
     lbl2 <- newLabel
-    lstart <- crntLabel
+    lstart <- getLabel
     [lstart, x] >>> [x, lbl2]
     [lstart] >>> [lbl1]
     (lend::Var, ()) <- lift $ runBlkAtLabel lbl1 b1
     (_   ::Var, ()) <- lift $ runBlkAtLabel lbl2 (b2 >> goto lend)
-    endLabel lend
+    setLabel lend
 
 whennz :: Var -> Blk r () -> Blk r ()
 whennz x = ifz x (return ())
@@ -84,15 +84,15 @@ copy x ys = do
 incr :: Var -> Blk r ()
 incr x = do
     comment $ printf "incr %s" x
-    lstart <- crntLabel
+    lstart <- getLabel
     lend <- newLabel
     [lstart] >>> [lend, x]
-    endLabel lend
+    setLabel lend
 
 decr :: Var -> Blk r ()
 decr x = do
     comment $ printf "decr %s" x
-    lstart <- crntLabel
+    lstart <- getLabel
     lend <- newLabel
     [lstart, x] >>> [lend]
     changeLabel lend
@@ -118,7 +118,7 @@ sub x y = do
 prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
     comment $ printf "prod %s %s %s" x y z
-    lstart <- crntLabel
+    lstart <- getLabel
     whennz y $ do
         copy x [z]
         decr y
@@ -126,7 +126,7 @@ prod x y z = do
 
 euclDiv :: Var -> Var -> Var -> Var -> Blk r ()
 euclDiv a b q r = whennz b $ do
-    lstart <- crntLabel
+    lstart <- getLabel
     min_ a b [r]
     ifz a
         (whenz b $ do
@@ -142,7 +142,7 @@ sqrt_ x r = do
     z <- newVar "z"
     incr t
     incr x
-    lstart <- crntLabel
+    lstart <- getLabel
     sub x z
     whennz x $ do
         incr t
@@ -157,16 +157,16 @@ submod :: Var -> Var -> Var -> Blk r ()
 submod x y n = do
     comment $ printf "submod %s %s %s" x y n
     sub x y
-    lbl1 <- crntLabel
+    lbl1 <- getLabel
     tmp <- newVar "cp"
     whennz y $ do
         clear x
         atCrntLabel $ [n, y] >>> [tmp]
         atCrntLabel $ [n] >>> [tmp, x]
-        newLabel >>= goto
+        newLabel >>= changeLabel
         move tmp n
         goto lbl1
-    newLabel >>= goto
+    newLabel >>= changeLabel
 
 bezout :: Var -> Var -> Var -> Blk r ()
 bezout a b s0 = do
