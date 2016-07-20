@@ -9,6 +9,7 @@ import Control.Monad
 import Control.Eff (Member, Eff, run, (:>))
 import Control.Eff.State.Strict (State, get, put, evalState)
 import Control.Eff.Writer.Strict (Writer, tell, runWriter, censor)
+import Text.Printf (printf)
 
 import QSet
 
@@ -58,33 +59,33 @@ fork x ys = do
     newLabel >>= goto
 
 clear :: Var -> Blk r ()
-clear x = fork x []
+clear x = do
+    comment $ printf "clear %s" x
+    fork x []
 
 move :: Var -> Var -> Blk r ()
-move x y = fork x [y]
+move x y = do
+    comment $ printf "move %s %s" x y
+    fork x [y]
 
 copy :: Var -> [Var] -> Blk r ()
 copy x ys = do
-    tmp <- newVar "copy"
+    comment $ printf "copy %s %s" x (show ys)
+    tmp <- newVar "cp"
     fork x (tmp:ys)
     move tmp x
 
 incr :: Var -> Blk r ()
 incr x = do
+    comment $ printf "incr %s" x
     lstart <- crntLabel
     lend <- newLabel
     [lstart] >>> [lend, x]
     endLabel lend
 
-incr2 :: Var -> Blk r ()
-incr2 x = do
-    lstart <- crntLabel
-    lend <- newLabel
-    [lstart] >>> [lend, x, x]
-    endLabel lend
-
 decr :: Var -> Blk r ()
 decr x = do
+    comment $ printf "decr %s" x
     lstart <- crntLabel
     lend <- newLabel
     [lstart, x] >>> [lend]
@@ -92,6 +93,7 @@ decr x = do
 
 add :: Var -> Var -> Var -> Blk r ()
 add x y z = do
+    comment $ printf "add %s %s %s" x y z
     move x z
     move y z
 
@@ -102,6 +104,7 @@ sub x y res = do
 
 prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
+    comment $ printf "prod %s %s %s" x y z
     lstart <- crntLabel
     whennz y $ do
         copy x [z]

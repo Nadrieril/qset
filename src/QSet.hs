@@ -12,20 +12,24 @@ import Control.Eff.Writer.Strict (Writer, tell, runWriter, censor)
 
 
 type Var = String
-data Instr = (:->) [Var] [Var]
+data Instr = (:->) [Var] [Var] | Comment String
 
 instance Show Instr where
     show (l :-> r) = unwords l ++ " > " ++ unwords r
+    show (Comment s) = "# "++s
 
 compile :: [Instr] -> String
-compile instrs = intercalate "," $ map aux instrs
+compile instrs = intercalate "," $ instrs >>= aux
     where
+        instrvars (l :-> r) = l ++ r
+        instrvars _ = []
         varcount :: M.Map Var Int
-        varcount = foldr (\(l :-> r) m -> foldr (M.alter $ Just . maybe 0 (+1)) m (l++r)) M.empty instrs
+        varcount = foldr (\i m -> foldr (M.alter $ Just . maybe 0 (+1)) m (instrvars i)) M.empty instrs
         vars = map snd $ sort $ map (\(a,b)->(b,a)) $ M.toList varcount
         varmap = M.fromList $ zip vars (map (:[]) ['a'..])
         lookupvar v = fromMaybe v $ M.lookup v varmap
-        aux (l :-> r) = unwords (map lookupvar r) ++ "/" ++ unwords (map lookupvar l)
+        aux (l :-> r) = return $ unwords (map lookupvar r) ++ "/" ++ unwords (map lookupvar l)
+        aux _ = []
 
 
 
@@ -78,6 +82,9 @@ runBlk ninputs b = run $
 
 (>>>) :: [Var] -> [Var] -> Blk r ()
 (>>>) l r = lift $ tell $ l :-> r
+
+comment :: String -> Blk r ()
+comment s = lift $ tell $ Comment s
 
 newLabelM :: M r Var
 newLabelM = do

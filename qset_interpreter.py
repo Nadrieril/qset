@@ -53,7 +53,7 @@ def interpret_step(program, qset):
 def print_qset(qset):
     keys = sorted([k for k in qset.keys() if k[0]!="l" ])
     labels = [k for k in qset.keys() if k[0]=="l" and qset[k]>0 ]
-    print(",   ".join("%3s: %2d" % (k, qset[k]) for k in labels+keys))
+    print(",  ".join("%3s: %2d" % (k, qset[k]) for k in labels+keys))
 
 def interpret(program, input, maxsteps=100):
     try:
@@ -125,10 +125,10 @@ def convert(o):
 
 import sys
 prog = sys.stdin.read()
-prog = ",".join([convert(x) for x in prog.strip().split('\n')])
+prog = ",".join([convert(x) for x in prog.strip().split('\n') if x[0] != '#'])
 print(prog)
 
-print(interpret(prog, list(map(int, sys.argv[1:])), 10000))
+print(interpret(prog, list(map(int, sys.argv[1:])), 100000))
 
 # def sqrt(x):
 #     s = 0
