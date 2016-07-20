@@ -128,7 +128,7 @@ prog = sys.stdin.read()
 prog = ",".join([convert(x) for x in prog.strip().split('\n') if x[0] != '#'])
 print(prog)
 
-print(interpret(prog, list(map(int, sys.argv[1:])), 100000))
+print(interpret(prog, list(map(int, sys.argv[1:])), 10000000))
 
 # def sqrt(x):
 #     s = 0

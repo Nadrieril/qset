@@ -74,6 +74,14 @@ move x y = do
     comment $ printf "move %s %s" x y
     fork x [y]
 
+swap :: Var -> Var -> Blk r ()
+swap x y = do
+    comment $ printf "swap %s %s" x y
+    tmp <- newVar "swp"
+    move x tmp
+    move y x
+    move tmp y
+
 copy :: Var -> [Var] -> Blk r ()
 copy x ys = do
     comment $ printf "copy %s %s" x (show ys)
@@ -118,11 +126,9 @@ sub x y = do
 prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
     comment $ printf "prod %s %s %s" x y z
-    lstart <- getLabel
-    whennz y $ do
+    whilenz y $ do
         copy x [z]
         decr y
-        goto lstart
 
 euclDiv :: Var -> Var -> Var -> Var -> Blk r ()
 euclDiv a b q r = whennz b $ do
@@ -142,42 +148,41 @@ sqrt_ x r = do
     z <- newVar "z"
     incr t
     incr x
-    lstart <- getLabel
     sub x z
-    whennz x $ do
+    whilenz x $ do
         incr t
         incr r
         copy t [z]
         incr t
         decr x
-        goto lstart
 
 
 submod :: Var -> Var -> Var -> Blk r ()
 submod x y n = do
     comment $ printf "submod %s %s %s" x y n
-    sub x y
-    lbl1 <- getLabel
     tmp <- newVar "cp"
-    whennz y $ do
+    sub x y
+    whilenz y $ do
         clear x
         atCrntLabel $ [n, y] >>> [tmp]
         atCrntLabel $ [n] >>> [tmp, x]
         newLabel >>= changeLabel
         move tmp n
-        goto lbl1
-    newLabel >>= changeLabel
+
+whilenz :: Var -> Blk r a -> Blk r ()
+whilenz x b = do
+    lstart <- getLabel
+    whennz x $ b >> goto lstart
 
 bezout :: Var -> Var -> Var -> Blk r ()
-bezout a b s0 = do
-    [q, r0, r1, r, _, s1, tmp0] <- mapM newVar
+bezout r0 b s0 = do
+    [q, _, r1, r, _, s1, tmp0] <- mapM newVar
         ["q", "r", "r", "r", "s", "s", "tmp"]
-    move a r0
     copy b [r1]
     incr s0
-    lstart <- crntLabel
+
     comment "main loop"
-    whennz r1 $ do
+    whilenz r1 $ do
         copy r1 [tmp0]
         comment "euclDiv r0 r1 q r"
         euclDiv r0 r1 q r
@@ -187,24 +192,27 @@ bezout a b s0 = do
         move r r1
 
         prod s1 q tmp0
-
         submod s0 tmp0 b
 
-        move s1 tmp0
-        move s0 s1
-        move tmp0 s0
+        swap s0 s1
 
-        goto lstart
     comment "cleanup"
 
-
+rsa :: Var -> Var -> Var -> Var -> Blk r ()
+rsa a b e ret = do
+    n <- newVar "n"
+    decr a
+    decr b
+    prod a b n
+    bezout e n ret
 
 prog :: Blk r ()
 -- prog = prod "i0" "i1" "o0"
 -- prog = copy "x" ["y", "z"]
 -- prog = euclDiv "i0" "i1" "o0" "o1"
 -- prog = sqrt_ "i0" "o0"
-prog = bezout "i0" "i1" "o0"
+-- prog = bezout "i0" "i1" "o0"
+prog = rsa "i0" "i1" "i2" "o0"
 
 -- [397, 397, 5] -> 125453
 -- [3, 7, 5] -> 5
