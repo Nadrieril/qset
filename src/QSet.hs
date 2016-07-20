@@ -26,7 +26,8 @@ compile instrs = intercalate "," $ instrs >>= aux
         varcount :: M.Map Var Int
         varcount = foldr (\i m -> foldr (M.alter $ Just . maybe 0 (+1)) m (instrvars i)) M.empty instrs
         vars = map snd $ sort $ map (\(a,b)->(b,a)) $ M.toList varcount
-        varmap = M.fromList $ zip vars (map (:[]) ['a'..])
+        filteredvars = filter (\x -> head x /= 'o' && head x /= 'i') vars
+        varmap = M.fromList $ zip filteredvars (map (:[]) $ ['a'..'z']++['A'..'Z']++['0'..'9'])
         lookupvar v = fromMaybe v $ M.lookup v varmap
         aux (l :-> r) = return $ unwords (map lookupvar r) ++ "/" ++ unwords (map lookupvar l)
         aux _ = []
