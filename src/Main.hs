@@ -1,8 +1,10 @@
 {-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DataKinds #-}
 module Main where
 
+import Data.Maybe
 import Control.Monad
 import Text.Printf (printf)
+import qualified Data.IntMap.Strict as IM
 
 import QSet
 import Eval
@@ -11,13 +13,36 @@ import Eval
 main :: IO ()
 main = do
     let instrs = runBlk 5 prog
-    forM_ instrs print
-    putStrLn ""
-    putStrLn $ compile instrs
-    putStrLn ""
-    print $ evalProg instrs [397, 397]
+
+    let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
+    let prof = profile instrs testcases
+    forM_ (zip [0..] instrs) $ \(linei, line) -> do
+        let percentSteps = fromMaybe 0 $ IM.lookup linei prof
+        putStrLn $ printf "% 3d. %s   # %.2f%%" linei (show line) (100 * percentSteps)
+    -- putStrLn ""
+
+    -- putStrLn $ compile instrs
+    -- putStrLn ""
+
+    -- let (_, steps, finalState) = evalProg instrs [397, 397]
+    -- print (finalState, steps)
     -- print $ evalProg instrs [3, 7, 5]
     -- print $ evalProg instrs [397, 397, 5]
+
+
+prog :: Blk r ()
+prog = prod "i0" "i1" "o0"
+-- prog = sqrt_ "i0" "o0"
+-- prog = rsa "i0" "i1" "i2" "o0"
+
+
+profile :: [Instr] -> [[Int]] -> IM.IntMap Float
+profile prog testcases =
+    let profFracs = flip map testcases $ \tc ->
+            let (prof, steps, _) = evalProg prog tc in
+            fmap (\x -> fromIntegral x / fromIntegral steps) prof
+        profFrac = (/ fromIntegral (length testcases)) <$> IM.unionsWith (+) profFracs
+    in profFrac
 
 
 reproduce :: Int -> [a] -> [a]
@@ -256,19 +281,3 @@ rsa a b e ret = do
     decr b
     prod a b n
     bezout e n ret
-
-prog :: Blk r ()
-prog = prod "i0" "i1" "o0"
--- prog = copy "x" ["y", "z"]
--- prog = euclDiv "i0" "i1" "o0" "o1"
--- prog = sqrt_ "i0" "o0"
--- prog = bezout "i0" "i1" "o0"
--- prog = rsa "i0" "i1" "i2" "o0"
-
--- [397, 397, 5] -> 125453
--- [3, 7, 5] -> 5
-
--- [5, 156816] -> 125453
--- [5, 12] -> 5
--- [11, 32] -> 3
--- [13, 40] -> 37
