@@ -97,38 +97,32 @@ def interpret(program, input, maxsteps=100):
         return ",".join(e.args)
 
 
-multiplication = """
-f0: i0 i1 > o0 x0 i1
-f0 i1 > f1
-f1: x0 > i0
-f1 > f0
-i1 > i1 f0
-i0 >
-f0 >
-"""
+def convert_fmt(prog):
+    def convert_line(l):
+        l = l.split(':')
+        if len(l) > 1:
+            flags = l[0]
+            l = l[1]
+        else:
+            flags = None
+            l = l[0]
+        l = [x.strip() for x in l.split(">")]
+
+        if flags:
+            l[0] += " "+flags
+            l[1] += " "+flags
+        return "/".join(l[::-1])
+
+    return ",".join([convert_line(x) for x in prog.strip().split('\n') if x[0] != '#'])
 
 
-def convert(o):
-    o = o.split(':')
-    if len(o) > 1:
-        flags = o[0]
-        o = o[1]
-    else:
-        flags = None
-        o = o[0]
-    o = [x.strip() for x in o.split(">")]
+if __name__ == "__main__":
+    import sys
+    prog = convert_fmt(sys.stdin.read())
+    print(prog)
 
-    if flags:
-        o[0] += " "+flags
-        o[1] += " "+flags
-    return "/".join(o[::-1])
+    print(interpret(prog, list(map(int, sys.argv[1:])), 10000000))
 
-import sys
-prog = sys.stdin.read()
-prog = ",".join([convert(x) for x in prog.strip().split('\n') if x[0] != '#'])
-print(prog)
-
-print(interpret(prog, list(map(int, sys.argv[1:])), 10000000))
 
 # def sqrt(x):
 #     s = 0
