@@ -12,6 +12,7 @@ import Control.Eff.Writer.Strict (Writer, tell, runWriter, censor)
 import Text.Printf (printf)
 
 import QSet
+import Eval
 
 
 main :: IO ()
@@ -20,6 +21,10 @@ main = do
     forM_ instrs print
     putStrLn ""
     putStrLn $ compile instrs
+    putStrLn ""
+    print $ evalProg instrs [397, 397]
+    -- print $ evalProg instrs [3, 7, 5]
+    -- print $ evalProg instrs [397, 397, 5]
 
 
 reproduce :: Int -> [a] -> [a]
@@ -260,12 +265,12 @@ rsa a b e ret = do
     bezout e n ret
 
 prog :: Blk r ()
--- prog = prod "i0" "i1" "o0"
+prog = prod "i0" "i1" "o0"
 -- prog = copy "x" ["y", "z"]
 -- prog = euclDiv "i0" "i1" "o0" "o1"
 -- prog = sqrt_ "i0" "o0"
 -- prog = bezout "i0" "i1" "o0"
-prog = rsa "i0" "i1" "i2" "o0"
+-- prog = rsa "i0" "i1" "i2" "o0"
 
 -- [397, 397, 5] -> 125453
 -- [3, 7, 5] -> 5
