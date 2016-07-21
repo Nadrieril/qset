@@ -1,5 +1,21 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DataKinds, DeriveFunctor, LambdaCase #-}
-module QSet where
+{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DataKinds, DeriveFunctor, LambdaCase, PatternSynonyms, ViewPatterns #-}
+module QSet (
+              Var
+            , Lbl
+            , Instr(..)
+            , Blk
+            , (>>>)
+            , (|->)
+            , pattern (:->)
+            , comment
+            , newLabel
+            , newVar
+            , getLabel
+            , setLabel
+            , faster
+            , runBlk
+            , compile
+            ) where
 
 import Data.List
 import Data.Maybe
@@ -13,11 +29,22 @@ import Control.Eff.Writer.Strict (Writer, tell, runWriter, runMonoidWriter, cens
 
 
 type Var = String
-data Instr = (:->) [Var] [Var] | Comment String
+type Lbl = String
+data Instr = Comment String
+    | SimpInstr [Var] [Var]
+    | LbldInstr Lbl Lbl [Var] [Var]
+
+pattern (:->) x y <- (\case
+                SimpInstr x y -> Just (x, y)
+                LbldInstr l1 l2 x y -> Just (l1:x, l2:y)
+                _ -> Nothing
+            -> Just (x, y)) where
+        (:->) x y = SimpInstr x y
 
 instance Show Instr where
     show (l :-> r) = unwords l ++ " > " ++ unwords r
     show (Comment s) = "# "++s
+    show _ = undefined
 
 compile :: [Instr] -> String
 compile instrs = intercalate "," $ instrs >>= aux
@@ -73,8 +100,9 @@ runBlk ninputs b = run $
                 return (lstart, lend)
 
         -- clear variables and inputs
-        forM_ vars (\v -> tellOne $ [lend, v] :-> [lend])
-        forM_ [0..ninputs-1] (\i -> tellOne $ [lend, "i"++show i] :-> [lend])
+        let inputs = map (\i -> "i"++show i) [0..ninputs-1]
+        forM_ (vars ++ inputs) (\v -> tellOne $ LbldInstr lend lend [v] [])
+        -- Ending point
         tellOne $ [lend] :-> []
         -- Starting point
         tellOne $ ["i0"] :-> ["i0", lstart]
@@ -84,8 +112,24 @@ runBlk ninputs b = run $
 tellOne :: (Typeable w, Member (Writer [w]) r) => w -> Eff r ()
 tellOne = tell . (:[])
 
+censorB :: ([Instr] -> [Instr]) -> Blk r a -> Blk r a
+censorB f b = Blk $ censor f . unBlk b
+
+
 (>>>) :: [Var] -> [Var] -> Blk r ()
-(>>>) l r = lift $ tellOne $ l :-> r
+(>>>) l r = do
+    lbl <- getLabel
+    lift $ tellOne $ LbldInstr lbl lbl l r
+
+(|->) :: Blk r () -> Var -> Blk r ()
+(|->) b lbl = do
+    clbl <- getLabel
+    censorB (map $ \case
+            SimpInstr l r -> LbldInstr clbl lbl l r
+            LbldInstr l1 _ l r -> LbldInstr l1 lbl l r
+            i -> i
+        ) b
+
 
 comment :: String -> Blk r ()
 comment s = lift $ tellOne $ Comment s
@@ -115,23 +159,13 @@ getLabel = Blk $ \lstart -> return (lstart, lstart)
 setLabel :: Var -> Blk r ()
 setLabel lend = Blk $ \_ -> return (lend, ())
 
-runBlkAtLabel :: Var -> Blk r a -> M r (Var, a)
-runBlkAtLabel = flip unBlk
-
-ifLabel :: Var -> Blk r a -> Blk r a
-ifLabel lbl b =
-    let prepend lbl = \case
-            (l :-> r) -> (lbl:l) :-> (lbl:r)
-            i -> i in
-    Blk $ censor (map $ prepend lbl) . unBlk b
-
-
-reproduce :: Int -> [a] -> [a]
-reproduce n l = concat $ replicate n l
 
 faster :: Int -> Blk r a -> Blk r a
-faster n b =
-    let accelerate = \case
-            (l :-> r) -> [reproduce n l :-> reproduce n r, l :-> r]
-            i -> [i] in
-    Blk $ censor (>>= accelerate) . unBlk b
+faster n =
+    censorB (>>= \case
+        SimpInstr l r -> [SimpInstr (reproduce n l) (reproduce n r), SimpInstr l r]
+        i@(LbldInstr _ _ [] []) -> [i]
+        LbldInstr l1 l2 l r | l1 == l2 -> [LbldInstr l1 l2 (reproduce n l) (reproduce n r), LbldInstr l1 l2 l r]
+        i -> [i]
+    )
+    where reproduce n l = concat $ replicate n l
