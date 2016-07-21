@@ -12,28 +12,33 @@ import Eval
 
 main :: IO ()
 main = do
+    let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
+    let prog = prod "i0" "i1" "o0"
+    -- let testcases = [[12*12], [2*2], [10*10], [15*15]]
+    -- let prog = sqrt_ "i0" "o0"
+    -- let prog = rsa "i0" "i1" "i2" "o0"
+
     let instrs = runBlk 5 prog
 
-    let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
-    let prof = profile instrs testcases
-    forM_ (zip [0..] instrs) $ \(linei, line) -> do
-        let percentSteps = fromMaybe 0 $ IM.lookup linei prof
-        putStrLn $ printf "% 3d. %s   # %.2f%%" linei (show line) (100 * percentSteps)
+    -- let prof = profile instrs testcases
+    -- forM_ (zip [0..] instrs) $ \(linei, line) -> do
+    --     let percentSteps = fromMaybe 0 $ IM.lookup linei prof
+    --     putStrLn $ printf "% 3d. %s   # %.2f%%" linei (show line) (100 * percentSteps)
     -- putStrLn ""
+
+
+    forM_ instrs print
+    putStrLn ""
 
     -- putStrLn $ compile instrs
     -- putStrLn ""
 
-    -- let (_, steps, finalState) = evalProg instrs [397, 397]
-    -- print (finalState, steps)
+    let (_, steps, finalState) = evalProg instrs $ testcases !! 1
+    print (finalState, steps)
     -- print $ evalProg instrs [3, 7, 5]
     -- print $ evalProg instrs [397, 397, 5]
 
 
-prog :: Blk r ()
-prog = prod "i0" "i1" "o0"
--- prog = sqrt_ "i0" "o0"
--- prog = rsa "i0" "i1" "i2" "o0"
 
 
 profile :: [Instr] -> [[Int]] -> IM.IntMap Float
@@ -44,9 +49,6 @@ profile prog testcases =
         profFrac = (/ fromIntegral (length testcases)) <$> IM.unionsWith (+) profFracs
     in profFrac
 
-
-reproduce :: Int -> [a] -> [a]
-reproduce n l = concat $ replicate n l
 
 goto :: Var -> Blk r ()
 goto lend = do
@@ -59,6 +61,9 @@ changeLabel lend = do
     lstart <- getLabel
     [lstart] >>> [lend]
     setLabel lend
+
+changeToNewLabel :: Blk r ()
+changeToNewLabel = newLabel >>= changeLabel
 
 atCrntLabel :: Blk r a -> Blk r a
 atCrntLabel b = do
@@ -84,20 +89,20 @@ whenz :: Var -> Blk r () -> Blk r ()
 whenz x = flip (ifz x) (return ())
 
 
-fork :: Var -> [Var] -> Blk r ()
-fork x ys = do
-    atCrntLabel $ [x] >>> ys
-    newLabel >>= changeLabel
+fork :: [Var] -> [Var] -> Blk r ()
+fork xs ys = do
+    atCrntLabel $ xs >>> ys
+    changeToNewLabel
 
 clear :: Var -> Blk r ()
 clear x = do
     comment $ printf "clear %s" x
-    fork x []
+    fork [x] []
 
 move :: Var -> Var -> Blk r ()
 move x y = do
     comment $ printf "move %s %s" x y
-    fork x [y]
+    fork [x] [y]
 
 swap :: Var -> Var -> Blk r ()
 swap x y = do
@@ -111,7 +116,7 @@ copy :: Var -> [Var] -> Blk r ()
 copy x ys = do
     comment $ printf "copy %s %s" x (show ys)
     tmp <- newVar "cp"
-    fork x (tmp:ys)
+    fork [x] (tmp:ys)
     move tmp x
 
 incr :: Var -> Blk r ()
@@ -139,14 +144,12 @@ add x y z = do
 min_ :: Var -> Var -> [Var] -> Blk r ()
 min_ x y res = do
     comment $ printf "min_ %s %s %s" x y (show res)
-    atCrntLabel $ [x, y] >>> res
-    newLabel >>= changeLabel
+    fork [x, y] res
 
 sub :: Var -> Var -> Blk r ()
 sub x y = do
     comment $ printf "sub %s %s" x y
-    atCrntLabel $ [x, y] >>> []
-    newLabel >>= changeLabel
+    fork [x, y] []
 
 prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
@@ -189,10 +192,9 @@ submod x y n = do
     fsub x y
     whilenz y $ do
         clear x
-        atCrntLabel $ reproduce 5 [n, y] >>> reproduce 5 [tmp]
-        atCrntLabel $ [n, y] >>> [tmp]
-        atCrntLabel $ reproduce 5 [n] >>> reproduce 5 [tmp, x]
-        atCrntLabel $ [n] >>> [tmp, x]
+        atCrntLabel $ faster 5 $ do
+            [n, y] >>> [tmp]
+            [n] >>> [tmp, x]
         changeToNewLabel
         fmove tmp n
 
@@ -203,22 +205,20 @@ whilenz x b = do
 
 
 
-ffork :: Var -> [Var] -> Blk r ()
-ffork x ys = do
-    let n = 5
-    atCrntLabel $ reproduce n [x] >>> reproduce n ys
-    atCrntLabel $ [x] >>> ys
+ffork :: [Var] -> [Var] -> Blk r ()
+ffork xs ys = do
+    atCrntLabel $ faster 5 $ xs >>> ys
     changeToNewLabel
 
 fclear :: Var -> Blk r ()
 fclear x = do
     comment $ printf "clear %s" x
-    ffork x []
+    ffork [x] []
 
 fmove :: Var -> Var -> Blk r ()
 fmove x y = do
     comment $ printf "move %s %s" x y
-    ffork x [y]
+    ffork [x] [y]
 
 fswap :: Var -> Var -> Blk r ()
 fswap x y = do
@@ -232,23 +232,18 @@ fcopy :: Var -> [Var] -> Blk r ()
 fcopy x ys = do
     comment $ printf "copy %s %s" x (show ys)
     tmp <- newVar "cp"
-    ffork x (tmp:ys)
+    ffork [x] (tmp:ys)
     fmove tmp x
 
 fmin_ :: Var -> Var -> [Var] -> Blk r ()
 fmin_ x y res = do
     comment $ printf "min_ %s %s %s" x y (show res)
-    let n = 5
-    atCrntLabel $ reproduce n [x, y] >>> reproduce n res
-    atCrntLabel $ [x, y] >>> res
-    changeToNewLabel
+    ffork [x, y] res
 
 fsub :: Var -> Var -> Blk r ()
 fsub x y = do
     comment $ printf "sub %s %s" x y
-    atCrntLabel $ reproduce 5 [x, y] >>> []
-    atCrntLabel $ [x, y] >>> []
-    changeToNewLabel
+    ffork [x, y] []
 
 bezout :: Var -> Var -> Var -> Blk r ()
 bezout r0 b s0 = do

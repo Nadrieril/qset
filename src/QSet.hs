@@ -3,12 +3,13 @@ module QSet where
 
 import Data.List
 import Data.Maybe
+import Data.Typeable
 import Data.Void (Void)
 import qualified Data.Map.Strict as M
 import Control.Monad
 import Control.Eff (Member, Eff, run, (:>))
 import Control.Eff.State.Strict (State, get, put, evalState)
-import Control.Eff.Writer.Strict (Writer, tell, runWriter, censor)
+import Control.Eff.Writer.Strict (Writer, tell, runWriter, runMonoidWriter, censor)
 
 
 type Var = String
@@ -35,7 +36,7 @@ compile instrs = intercalate "," $ instrs >>= aux
 
 
 type M r e =
-    ( Member (Writer Instr) r
+    ( Member (Writer [Instr]) r
     , Member (Writer Var) r
     , Member (State (M.Map String Int)) r
     ) => Eff r e
@@ -61,9 +62,9 @@ instance Monad (Blk r) where
         unBlk (bf x) lbl1
 
 
-runBlk :: Int -> Blk (State (M.Map String Int) :> Writer Var :> Writer Instr :> Void) () -> [Instr]
+runBlk :: Int -> Blk (State (M.Map String Int) :> Writer Var :> Writer [Instr] :> Void) () -> [Instr]
 runBlk ninputs b = run $
-    fmap fst $ runWriter (:) ([] :: [Instr]) $ do
+    fmap fst $ runMonoidWriter $ do
         (vars, (lstart, lend)) <-
             runWriter (:) ([] :: [Var]) $
             evalState M.empty $ do
@@ -72,20 +73,22 @@ runBlk ninputs b = run $
                 return (lstart, lend)
 
         -- clear variables and inputs
-        forM_ vars (\v -> tell $ [lend, v] :-> [lend])
-        forM_ [0..ninputs-1] (\i -> tell $ [lend, "i"++show i] :-> [lend])
-        tell $ [lend] :-> []
+        forM_ vars (\v -> tellOne $ [lend, v] :-> [lend])
+        forM_ [0..ninputs-1] (\i -> tellOne $ [lend, "i"++show i] :-> [lend])
+        tellOne $ [lend] :-> []
         -- Starting point
-        tell $ ["i0"] :-> ["i0", lstart]
+        tellOne $ ["i0"] :-> ["i0", lstart]
         return ()
 
 
+tellOne :: (Typeable w, Member (Writer [w]) r) => w -> Eff r ()
+tellOne = tell . (:[])
 
 (>>>) :: [Var] -> [Var] -> Blk r ()
-(>>>) l r = lift $ tell $ l :-> r
+(>>>) l r = lift $ tellOne $ l :-> r
 
 comment :: String -> Blk r ()
-comment s = lift $ tell $ Comment s
+comment s = lift $ tellOne $ Comment s
 
 newLabelM :: M r Var
 newLabelM = do
@@ -120,4 +123,15 @@ ifLabel lbl b =
     let prepend lbl = \case
             (l :-> r) -> (lbl:l) :-> (lbl:r)
             i -> i in
-    Blk $ censor (prepend lbl) . unBlk b
+    Blk $ censor (map $ prepend lbl) . unBlk b
+
+
+reproduce :: Int -> [a] -> [a]
+reproduce n l = concat $ replicate n l
+
+faster :: Int -> Blk r a -> Blk r a
+faster n b =
+    let accelerate = \case
+            (l :-> r) -> [reproduce n l :-> reproduce n r, l :-> r]
+            i -> [i] in
+    Blk $ censor (>>= accelerate) . unBlk b
