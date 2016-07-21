@@ -16,12 +16,14 @@ import QSet
 
 main :: IO ()
 main = do
-    let instrs = runBlk 2 prog
+    let instrs = runBlk 5 prog
     forM_ instrs print
-    -- putStrLn ""
-    -- putStrLn $ compile instrs
+    putStrLn ""
+    putStrLn $ compile instrs
 
 
+reproduce :: Int -> [a] -> [a]
+reproduce n l = concat $ replicate n l
 
 goto :: Var -> Blk r ()
 goto lend = do
@@ -127,13 +129,13 @@ prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
     comment $ printf "prod %s %s %s" x y z
     whilenz y $ do
-        copy x [z]
+        fcopy x [z]
         decr y
 
 euclDiv :: Var -> Var -> Var -> Var -> Blk r ()
 euclDiv a b q r = whennz b $ do
     lstart <- getLabel
-    min_ a b [r]
+    fmin_ a b [r]
     ifz a
         (whenz b $ do
             incr q
@@ -161,18 +163,69 @@ submod :: Var -> Var -> Var -> Blk r ()
 submod x y n = do
     comment $ printf "submod %s %s %s" x y n
     tmp <- newVar "cp"
-    sub x y
+    fsub x y
     whilenz y $ do
         clear x
+        atCrntLabel $ reproduce 5 [n, y] >>> reproduce 5 [tmp]
         atCrntLabel $ [n, y] >>> [tmp]
+        atCrntLabel $ reproduce 5 [n] >>> reproduce 5 [tmp, x]
         atCrntLabel $ [n] >>> [tmp, x]
-        newLabel >>= changeLabel
-        move tmp n
+        changeToNewLabel
+        fmove tmp n
 
 whilenz :: Var -> Blk r a -> Blk r ()
 whilenz x b = do
     lstart <- getLabel
     whennz x $ b >> goto lstart
+
+
+
+ffork :: Var -> [Var] -> Blk r ()
+ffork x ys = do
+    let n = 5
+    atCrntLabel $ reproduce n [x] >>> reproduce n ys
+    atCrntLabel $ [x] >>> ys
+    changeToNewLabel
+
+fclear :: Var -> Blk r ()
+fclear x = do
+    comment $ printf "clear %s" x
+    ffork x []
+
+fmove :: Var -> Var -> Blk r ()
+fmove x y = do
+    comment $ printf "move %s %s" x y
+    ffork x [y]
+
+fswap :: Var -> Var -> Blk r ()
+fswap x y = do
+    comment $ printf "swap %s %s" x y
+    tmp <- newVar "swp"
+    fmove x tmp
+    fmove y x
+    fmove tmp y
+
+fcopy :: Var -> [Var] -> Blk r ()
+fcopy x ys = do
+    comment $ printf "copy %s %s" x (show ys)
+    tmp <- newVar "cp"
+    ffork x (tmp:ys)
+    fmove tmp x
+
+fmin_ :: Var -> Var -> [Var] -> Blk r ()
+fmin_ x y res = do
+    comment $ printf "min_ %s %s %s" x y (show res)
+    let n = 5
+    atCrntLabel $ reproduce n [x, y] >>> reproduce n res
+    atCrntLabel $ [x, y] >>> res
+    changeToNewLabel
+
+fsub :: Var -> Var -> Blk r ()
+fsub x y = do
+    comment $ printf "sub %s %s" x y
+    atCrntLabel $ reproduce 5 [x, y] >>> []
+    atCrntLabel $ [x, y] >>> []
+    changeToNewLabel
 
 bezout :: Var -> Var -> Var -> Blk r ()
 bezout r0 b s0 = do
@@ -183,13 +236,13 @@ bezout r0 b s0 = do
 
     comment "main loop"
     whilenz r1 $ do
-        copy r1 [tmp0]
+        fcopy r1 [tmp0]
         comment "euclDiv r0 r1 q r"
         euclDiv r0 r1 q r
         clear r0
-        move tmp0 r0
+        fmove tmp0 r0
         clear r1
-        move r r1
+        fmove r r1
 
         prod s1 q tmp0
         submod s0 tmp0 b
