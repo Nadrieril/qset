@@ -1,14 +1,7 @@
 {-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DataKinds #-}
 module Main where
 
-import Data.List
-import Data.Maybe
-import Data.Void (Void)
-import qualified Data.Map.Strict as M
 import Control.Monad
-import Control.Eff (Member, Eff, run, (:>))
-import Control.Eff.State.Strict (State, get, put, evalState)
-import Control.Eff.Writer.Strict (Writer, tell, runWriter, censor)
 import Text.Printf (printf)
 
 import QSet

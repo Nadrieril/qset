@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DataKinds, DeriveFunctor #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DataKinds, DeriveFunctor, LambdaCase #-}
 module QSet where
 
 import Data.List
@@ -117,5 +117,7 @@ runBlkAtLabel = flip unBlk
 
 ifLabel :: Var -> Blk r a -> Blk r a
 ifLabel lbl b =
-    let prepend lbl (l :-> r) = (lbl:l) :-> (lbl:r) in
+    let prepend lbl = \case
+            (l :-> r) -> (lbl:l) :-> (lbl:r)
+            i -> i in
     Blk $ censor (prepend lbl) . unBlk b
