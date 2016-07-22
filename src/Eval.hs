@@ -21,7 +21,7 @@ type Eval r e =
 data Rule = Rule Int [Var] [Var]
 
 instrsToRules :: [Instr] -> [Rule]
-instrsToRules instrs = mapMaybe aux $ zip [(0::Int)..] instrs
+instrsToRules instrs = mapMaybe aux $ zip [(0::Int)..] (instrs >>= toSimpleInstr)
     where
         aux (li, l :-> r) = Just $ Rule li l r
         aux _ = Nothing

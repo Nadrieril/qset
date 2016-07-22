@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DataKinds, DeriveFunctor, LambdaCase, PatternSynonyms, ViewPatterns #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DeriveFunctor, LambdaCase, PatternSynonyms #-}
 module QSet (
               Var
             , Lbl
@@ -7,11 +7,14 @@ module QSet (
             , (>>>)
             , (|->)
             , pattern (:->)
+            , toSimpleInstr
             , comment
             , newLabel
             , newVar
             , getLabel
             , setLabel
+            , changeLabel
+            , changeToNewLabel
             , faster
             , runBlk
             , compile
@@ -32,22 +35,27 @@ type Var = String
 type Lbl = String
 data Instr = Comment String
     | SimpInstr [Var] [Var]
-    | LbldInstr Lbl Lbl [Var] [Var]
+    | LbldInstr Lbl [Var] Lbl [Var]
+    | ForkInstr Lbl [Var] Lbl [Var] Lbl
 
-pattern (:->) x y <- (\case
-                SimpInstr x y -> Just (x, y)
-                LbldInstr l1 l2 x y -> Just (l1:x, l2:y)
-                _ -> Nothing
-            -> Just (x, y)) where
+
+toSimpleInstr :: Instr -> [Instr]
+toSimpleInstr (LbldInstr l1 x l2 y) = [SimpInstr (l1:x) (l2:y)]
+toSimpleInstr (ForkInstr l1 x l2 y l3) = [LbldInstr l1 x l2 y, LbldInstr l1 [] l3 []] >>= toSimpleInstr
+toSimpleInstr i = [i]
+
+
+pattern (:->) x y <- SimpInstr x y where
         (:->) x y = SimpInstr x y
 
 instance Show Instr where
-    show (l :-> r) = unwords l ++ " > " ++ unwords r
     show (Comment s) = "# "++s
-    show _ = undefined
+    show i = intercalate ", " $ map aux $ toSimpleInstr i
+        where aux (l :-> r) = unwords l ++ " > " ++ unwords r
+              aux _ = undefined
 
 compile :: [Instr] -> String
-compile instrs = intercalate "," $ instrs >>= aux
+compile instrs = intercalate "," $ instrs >>= toSimpleInstr >>= aux
     where
         instrvars (l :-> r) = l ++ r
         instrvars _ = []
@@ -101,7 +109,7 @@ runBlk ninputs b = run $
 
         -- clear variables and inputs
         let inputs = map (\i -> "i"++show i) [0..ninputs-1]
-        forM_ (vars ++ inputs) (\v -> tellOne $ LbldInstr lend lend [v] [])
+        forM_ (vars ++ inputs) (\v -> tellOne $ LbldInstr lend [v] lend [])
         -- Ending point
         tellOne $ [lend] :-> []
         -- Starting point
@@ -114,21 +122,6 @@ tellOne = tell . (:[])
 
 censorB :: ([Instr] -> [Instr]) -> Blk r a -> Blk r a
 censorB f b = Blk $ censor f . unBlk b
-
-
-(>>>) :: [Var] -> [Var] -> Blk r ()
-(>>>) l r = do
-    lbl <- getLabel
-    lift $ tellOne $ LbldInstr lbl lbl l r
-
-(|->) :: Blk r () -> Var -> Blk r ()
-(|->) b lbl = do
-    clbl <- getLabel
-    censorB (map $ \case
-            SimpInstr l r -> LbldInstr clbl lbl l r
-            LbldInstr l1 _ l r -> LbldInstr l1 lbl l r
-            i -> i
-        ) b
 
 
 comment :: String -> Blk r ()
@@ -160,12 +153,44 @@ setLabel :: Var -> Blk r ()
 setLabel lend = Blk $ \_ -> return (lend, ())
 
 
+changeLabel :: Lbl -> Blk r ()
+changeLabel lend = do
+    lbl <- getLabel
+    () <- lift $ tellOne $ LbldInstr lbl [] lend []
+    setLabel lend
+
+changeToNewLabel :: Blk r ()
+changeToNewLabel = newLabel >>= changeLabel
+
+(>>>) :: [Var] -> [Var] -> Blk r ()
+(>>>) l r = do
+    lstart <- getLabel
+    lend <- newLabel
+    () <- lift $ tellOne $ if null l
+        then LbldInstr lstart l lstart r
+        else ForkInstr lstart l lstart r lend
+    setLabel lend
+
+(|->) :: Blk r () -> Var -> Blk r ()
+(|->) b lbl = do
+    clbl <- getLabel
+    censorB (map $ \case
+            Comment s -> Comment s
+            SimpInstr l r -> LbldInstr clbl l lbl r
+            LbldInstr l1 l _ r -> LbldInstr l1 l lbl r
+            ForkInstr l1 l _ r l3 -> ForkInstr l1 l lbl r l3
+        ) b
+
+
 faster :: Int -> Blk r a -> Blk r a
 faster n =
     censorB (>>= \case
         SimpInstr l r -> [SimpInstr (reproduce n l) (reproduce n r), SimpInstr l r]
         i@(LbldInstr _ _ [] []) -> [i]
-        LbldInstr l1 l2 l r | l1 == l2 -> [LbldInstr l1 l2 (reproduce n l) (reproduce n r), LbldInstr l1 l2 l r]
-        i -> [i]
+        LbldInstr l1 l l2 r | l1 == l2 -> [LbldInstr l1 (reproduce n l) l2 (reproduce n r), LbldInstr l1 l l2 r]
+        i@LbldInstr{} -> [i]
+        ForkInstr l1 l l2 r l3 | l1 == l2 -> [LbldInstr l1 (reproduce n l) l2 (reproduce n r), ForkInstr l1 l l2 r l3]
+        i@ForkInstr{} -> [i]
+        Comment s -> [Comment s]
     )
     where reproduce n l = concat $ replicate n l

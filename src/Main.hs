@@ -2,7 +2,7 @@
 module Main where
 
 import Data.Maybe
-import Control.Monad
+import Control.Monad(forM_, when)
 import Text.Printf (printf)
 import qualified Data.IntMap.Strict as IM
 
@@ -12,13 +12,13 @@ import Eval
 
 main :: IO ()
 main = do
-    -- let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
-    -- let prog = prod "i0" "i1" "o0"
+    let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
+    let prog = prod "i0" "i1" "o0"
     -- let testcases = [[12*12], [2*2], [10*10], [15*15]]
     -- let prog = sqrt_ "i0" "o0"
     -- let testcases = [[397, 397, 5]]
-    let testcases = [[3, 7, 5], [29, 47, 5], [37, 43, 11], [5, 13, 17], [37, 5, 11], [37, 37, 11], [7, 17, 7], [3, 3, 3]]
-    let prog = faster 6 $ rsa "i0" "i1" "i2" "o0"
+    -- let testcases = [[3, 7, 5], [29, 47, 5], [37, 43, 11], [5, 13, 17], [37, 5, 11], [37, 37, 11], [7, 17, 7], [3, 3, 3]]
+    -- let prog = faster 6 $ rsa "i0" "i1" "i2" "o0"
 
     let doProfile = False
     let doTest = Just 1
@@ -26,7 +26,7 @@ main = do
 
 
 
-    let instrs = runBlk 5 prog
+    let instrs = runBlk 5 prog >>= toSimpleInstr
 
     if doProfile
         then do
@@ -58,30 +58,20 @@ profile prog testcases =
 
 
 goto :: Lbl -> Blk r ()
-goto lend = do
-    [] >>> [] |-> lend
-    newLabel >>= setLabel
-
-changeLabel :: Lbl -> Blk r ()
-changeLabel lend = do
-    [] >>> [] |-> lend
-    setLabel lend
-
-changeToNewLabel :: Blk r ()
-changeToNewLabel = newLabel >>= changeLabel
-
+goto lend = [] >>> [] |-> lend
 
 ifz :: Var -> Blk r () -> Blk r () -> Blk r ()
 ifz x b1 b2 = do
     comment $ printf "ifz %s" x
     lbl1 <- newLabel
     lbl2 <- newLabel
+    lend <- newLabel
     [x] >>> [x] |-> lbl2
-    [] >>> [] |-> lbl1
+    goto lbl1
 
     setLabel lbl1
     b1
-    lend <- getLabel
+    goto lend
 
     setLabel lbl2
     b2
@@ -102,20 +92,15 @@ whilenz x b = do
     whennz x $ b >> goto lstart
 
 
-fork :: [Var] -> [Var] -> Blk r ()
-fork xs ys = do
-    xs >>> ys
-    changeToNewLabel
-
 clear :: Var -> Blk r ()
 clear x = do
     comment $ printf "clear %s" x
-    fork [x] []
+    [x] >>> []
 
 move :: Var -> Var -> Blk r ()
 move x y = do
     comment $ printf "move %s %s" x y
-    fork [x] [y]
+    [x] >>> [y]
 
 swap :: Var -> Var -> Blk r ()
 swap x y = do
@@ -129,7 +114,7 @@ copy :: Var -> [Var] -> Blk r ()
 copy x ys = do
     comment $ printf "copy %s %s" x (show ys)
     tmp <- newVar "cp"
-    fork [x] (tmp:ys)
+    [x] >>> (tmp:ys)
     move tmp x
 
 incr :: Var -> Blk r ()
@@ -144,7 +129,7 @@ decr x = do
     comment $ printf "decr %s" x
     lend <- newLabel
     [x] >>> [] |-> lend
-    [] >>> [] |-> lend
+    goto lend
     setLabel lend
 
 add :: Var -> Var -> Var -> Blk r ()
@@ -156,7 +141,7 @@ add x y z = do
 sub :: Var -> Var -> Blk r ()
 sub x y = do
     comment $ printf "sub %s %s" x y
-    fork [x, y] []
+    [x, y] >>> []
 
 prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
@@ -168,8 +153,7 @@ prod x y z = do
 euclDiv :: Var -> Var -> Var -> Var -> Blk r ()
 euclDiv a b q r = whennz b $ do
     lstart <- getLabel
-    comment "fork [a, b] [r]"
-    fork [a, b] [r]
+    [a, b] >>> [r]
     ifz a
         (whenz b $ do
             incr q
@@ -202,7 +186,6 @@ submod x y n = do
         clear x
         [n, y] >>> [tmp]
         [n] >>> [tmp, x]
-        changeToNewLabel
         move tmp n
 
 
