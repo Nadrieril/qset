@@ -193,7 +193,7 @@ goto :: Lbl -> Blk r ()
 goto lend = do
     lstart <- getLabel
     tellOneB $ GotoInstr lstart lend []
-    setLabel lend
+    newLabel >>= setLabel
 
 ifz :: Var -> Blk r () -> Blk r () -> Blk r ()
 ifz x b1 b2 = do
