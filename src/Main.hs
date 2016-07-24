@@ -147,13 +147,15 @@ sqrt_ x r = do
     z <- newVar "z"
     incr t
     incr x
+    lstart <- getLabel
     sub x z
-    whilenz x $ do
+    whennz x $ do
         incr t
         incr r
         copy t [z]
         incr t
         decr x
+        goto lstart
 
 
 submod :: Var -> Var -> Var -> Blk r ()
