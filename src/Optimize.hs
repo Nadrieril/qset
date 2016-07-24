@@ -58,8 +58,50 @@ optimize lstart lend instrs = run $
     flip runReader (lstart, lend) $
     evalState (M.empty :: Graph) $ do
         constructInstrGraph instrs
+        pathCompress
         deconstructGraph <$> get
 
 compileOptimized :: Int -> ([Instr], [Var], Lbl, Lbl) -> [SimpInstr]
 compileOptimized ninputs (instrs, vars, lstart, lend) =
     compile ninputs (optimize lstart lend instrs, vars, lstart, lend)
+
+
+
+getNode :: Lbl -> G r (Maybe GNode)
+getNode lbl = do
+    graph <- get
+    return $ lbl `M.lookup` graph
+
+
+pathCompress :: G r ()
+pathCompress = do
+    (lstart, _::Lbl) <- ask
+    pathCompressAt lstart
+
+pathCompressAt :: Lbl -> G r ()
+pathCompressAt lbl = getNode lbl >>= \case
+    Nothing -> return ()
+    Just GNode{ visited = True } -> return ()
+    Just (gn@GNode{ node = node }) -> do
+        modify $ M.insert lbl (gn { visited = True })
+        nnode <- case node of
+            Go t1@(_, l1) -> do
+                pathCompressAt l1
+                n1 <- getNode l1
+                let t1' = fromMaybe t1 (compress t1 =<< n1)
+                return $ Go t1'
+            Branch x t1@(_, l1) t2@(_, l2) -> do
+                pathCompressAt l1
+                pathCompressAt l2
+                n1 <- getNode l1
+                n2 <- getNode l2
+                let t1' = fromMaybe t1 (compress t1 =<< n1)
+                let t2' = fromMaybe t2 (compress t2 =<< n2)
+                return $ Branch x t1' t2'
+
+        modify $ M.insert lbl (gn { node = nnode, visited = True })
+
+    where compress (pat, _) = (. node) $ \case
+            Go (y, l1) -> Just (pat `MS.union` y, l1)
+            Branch x (y, l1) _  | x `MS.isSubsetOf` pat -> Just ((pat `MS.difference` x) `MS.union` y, l1)
+            _ -> Nothing
