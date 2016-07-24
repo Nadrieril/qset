@@ -27,7 +27,7 @@ main = do
 
 
 
-    let instrs = runBlk 5 prog >>= toSimpleInstr
+    let instrs = runBlk 5 prog
 
     if doProfile
         then do
@@ -49,7 +49,7 @@ main = do
 
 
 
-profile :: [Instr] -> [[Int]] -> IM.IntMap Float
+profile :: [SimpInstr] -> [[Int]] -> IM.IntMap Float
 profile prog testcases =
     let profFracs = flip map testcases $ \tc ->
             let (prof, steps, _) = evalProg prog tc in

@@ -1,8 +1,9 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DeriveFunctor, LambdaCase, PatternSynonyms #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, TypeOperators, DeriveFunctor, LambdaCase, PatternSynonyms, ViewPatterns #-}
 module QSet (
               Var
             , Lbl
             , Instr(..)
+            , SimpInstr(..)
             , Blk
             , loop
             , ifz
@@ -26,34 +27,46 @@ import qualified Data.Map.Strict as M
 import Control.Monad
 import Control.Eff (Member, Eff, run, (:>))
 import Control.Eff.State.Strict (State, get, put, evalState)
-import Control.Eff.Writer.Strict (Writer, tell, runWriter, runMonoidWriter, censor)
+import Control.Eff.Writer.Strict (Writer, tell, runWriter, runMonoidWriter)
 
 
 type Var = String
 type Lbl = String
-data Instr = Comment String
+
+data SimpInstr = SComment String
     | SimpInstr [Var] [Var]
     | LbldInstr Lbl [Var] Lbl [Var]
+
+data Instr = Comment String
+    | GotoInstr Lbl Lbl [Var]
     | ForkInstr Lbl [Var] Lbl [Var] Lbl
 
 
-toSimpleInstr :: Instr -> [Instr]
-toSimpleInstr (LbldInstr l1 x l2 y) = [SimpInstr (l1:x) (l2:y)]
-toSimpleInstr (ForkInstr l1 x l2 y l3) = [LbldInstr l1 x l2 y, LbldInstr l1 [] l3 []] >>= toSimpleInstr
-toSimpleInstr i = [i]
+toSimpleInstr :: Instr -> [SimpInstr]
+toSimpleInstr (Comment s) = [SComment s]
+toSimpleInstr (GotoInstr l1 l2 y) = [LbldInstr l1 [] l2 y]
+toSimpleInstr (ForkInstr l1 x l2 y l3) = [LbldInstr l1 x l2 y, LbldInstr l1 [] l3 []]
 
 
-pattern (:->) x y <- SimpInstr x y where
+pattern (:->) x y <- (\case
+                SimpInstr x y -> Just (x, y)
+                LbldInstr l1 x l2 y -> Just (l1:x, l2:y)
+                _ -> Nothing
+            -> Just (x, y)) where
         (:->) x y = SimpInstr x y
+
+instance Show SimpInstr where
+    show (SComment s) = "# "++s
+    show (l :-> r) = unwords l ++ " > " ++ unwords r
+    show _ = undefined
 
 instance Show Instr where
     show (Comment s) = "# "++s
-    show i = intercalate ", " $ map aux $ toSimpleInstr i
-        where aux (l :-> r) = unwords l ++ " > " ++ unwords r
-              aux _ = undefined
+    show i = intercalate ", " $ map show $ toSimpleInstr i
 
-compile :: [Instr] -> String
-compile instrs = intercalate "," $ instrs >>= toSimpleInstr >>= aux
+
+compile :: [SimpInstr] -> String
+compile instrs = intercalate "," $ instrs >>= aux
     where
         instrvars (l :-> r) = l ++ r
         instrvars _ = []
@@ -95,24 +108,30 @@ instance Monad (Blk r) where
         unBlk (bf x) lbl1
 
 
-runBlk :: Int -> Blk (State (M.Map String Int) :> Writer Var :> Writer [Instr] :> Void) () -> [Instr]
-runBlk ninputs b = run $
-    fmap fst $ runMonoidWriter $ do
-        (vars, (lstart, lend)) <-
-            runWriter (:) ([] :: [Var]) $
-            evalState M.empty $ do
-                lstart <- newLabelM
-                (lend, ()) <- unBlk b lstart
-                return (lstart, lend)
+runBlk :: Int -> Blk (State (M.Map String Int) :> Writer Var :> Writer [Instr] :> Void) () -> [SimpInstr]
+runBlk ninputs b = run $ do
+    (instrs, (vars, (lstart, lend))) <-
+        runMonoidWriter $
+        runWriter (:) ([] :: [Var]) $
+        evalState M.empty $ do
+            lstart <- newLabelM
+            (lend, ()) <- unBlk b lstart
+            return (lstart, lend)
+    epilogueinstrs <- fmap fst $
+        runMonoidWriter $
+        epilogue lstart lend ninputs vars
+    return $ (instrs >>= toSimpleInstr) ++ epilogueinstrs
 
+
+epilogue :: (Member (Writer [SimpInstr]) r) => Lbl -> Lbl -> Int -> [Var] -> Eff r ()
+epilogue lstart lend ninputs vars = do
         -- clear variables and inputs
         let inputs = map (\i -> "i"++show i) [0..ninputs-1]
-        forM_ (vars ++ inputs) (\v -> tellOne $ LbldInstr lend [v] lend [])
+        forM_ (vars ++ inputs) (\v -> tellOne $ [lend, v] :-> [lend])
         -- Ending point
         tellOne $ [lend] :-> []
         -- Starting point
         tellOne $ ["i0"] :-> ["i0", lstart]
-        return ()
 
 
 tellOne :: (Typeable w, Member (Writer [w]) r) => w -> Eff r ()
@@ -120,9 +139,6 @@ tellOne = tell . (:[])
 
 tellOneB :: Instr -> Blk r ()
 tellOneB i = lift $ tellOne i
-
-censorB :: ([Instr] -> [Instr]) -> Blk r a -> Blk r a
-censorB f b = Blk $ censor f . unBlk b
 
 
 comment :: String -> Blk r ()
@@ -160,7 +176,7 @@ transition l r = do
     lstart <- getLabel
     lend <- newLabel
     tellOneB $ if null l
-        then LbldInstr lstart [] lend r
+        then GotoInstr lstart lend r
         else ForkInstr lstart l lend r lend
     setLabel lend
 
@@ -169,14 +185,14 @@ loop l r = do
     lstart <- getLabel
     lend <- newLabel
     tellOneB $ if null l
-        then LbldInstr lstart [] lstart r
+        then GotoInstr lstart lstart r
         else ForkInstr lstart l lstart r lend
     setLabel lend
 
 goto :: Lbl -> Blk r ()
 goto lend = do
     lstart <- getLabel
-    tellOneB $ LbldInstr lstart [] lend []
+    tellOneB $ GotoInstr lstart lend []
     setLabel lend
 
 ifz :: Var -> Blk r () -> Blk r () -> Blk r ()
@@ -196,15 +212,9 @@ ifz x b1 b2 = do
     setLabel lend
 
 
-faster :: Int -> Blk r a -> Blk r a
-faster n =
-    censorB (>>= \case
-        SimpInstr l r -> [SimpInstr (reproduce n l) (reproduce n r), SimpInstr l r]
-        i@(LbldInstr _ _ [] []) -> [i]
+faster :: Int -> [SimpInstr] -> [SimpInstr]
+faster n = (>>= \case
         LbldInstr l1 l l2 r | l1 == l2 -> [LbldInstr l1 (reproduce n l) l2 (reproduce n r), LbldInstr l1 l l2 r]
-        i@LbldInstr{} -> [i]
-        ForkInstr l1 l l2 r l3 | l1 == l2 -> [LbldInstr l1 (reproduce n l) l2 (reproduce n r), ForkInstr l1 l l2 r l3]
-        i@ForkInstr{} -> [i]
-        Comment s -> [Comment s]
+        i -> [i]
     )
     where reproduce n l = concat $ replicate n l

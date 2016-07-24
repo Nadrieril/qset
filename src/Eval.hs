@@ -20,8 +20,8 @@ type Eval r e =
 
 data Rule = Rule Int [Var] [Var]
 
-instrsToRules :: [Instr] -> [Rule]
-instrsToRules instrs = mapMaybe aux $ zip [(0::Int)..] (instrs >>= toSimpleInstr)
+instrsToRules :: [SimpInstr] -> [Rule]
+instrsToRules instrs = mapMaybe aux $ zip [(0::Int)..] instrs
     where
         aux (li, l :-> r) = Just $ Rule li l r
         aux _ = Nothing
@@ -58,7 +58,7 @@ eval prog = loop True
             modify (+ (1::Int))
             stepProg prog >>= loop
 
-evalProg :: [Instr] -> [Int] -> (IM.IntMap Int, Int, [Int])
+evalProg :: [SimpInstr] -> [Int] -> (IM.IntMap Int, Int, [Int])
 evalProg prog initialState =
     let initialMS = (MS.fromOccurList $ zip ["i"++show i | i <- [(0::Int)..]] initialState) in
     let (prof, (steps, finalMS)) = run $
