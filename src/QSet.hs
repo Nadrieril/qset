@@ -17,6 +17,7 @@ module QSet (
             , faster
             , runBlk
             , compile
+            , toQsetCode
             ) where
 
 import Data.List
@@ -65,8 +66,8 @@ instance Show Instr where
     show i = intercalate ", " $ map show $ toSimpleInstr i
 
 
-compile :: [SimpInstr] -> String
-compile instrs = intercalate "," $ instrs >>= aux
+toQsetCode :: [SimpInstr] -> String
+toQsetCode instrs = intercalate "," $ instrs >>= aux
     where
         instrvars (l :-> r) = l ++ r
         instrvars _ = []
@@ -108,8 +109,8 @@ instance Monad (Blk r) where
         unBlk (bf x) lbl1
 
 
-runBlk :: Int -> Blk (State (M.Map String Int) :> Writer Var :> Writer [Instr] :> Void) () -> [SimpInstr]
-runBlk ninputs b = run $ do
+runBlk :: Blk (State (M.Map String Int) :> Writer Var :> Writer [Instr] :> Void) () -> ([Instr], [Var], Lbl, Lbl)
+runBlk b = run $ do
     (instrs, (vars, (lstart, lend))) <-
         runMonoidWriter $
         runWriter (:) ([] :: [Var]) $
@@ -117,10 +118,14 @@ runBlk ninputs b = run $ do
             lstart <- newLabelM
             (lend, ()) <- unBlk b lstart
             return (lstart, lend)
+    return (instrs, vars, lstart, lend)
+
+compile :: Int -> ([SimpInstr], [Var], Lbl, Lbl) -> [SimpInstr]
+compile ninputs (instrs, vars, lstart, lend) = run $ do
     epilogueinstrs <- fmap fst $
         runMonoidWriter $
         epilogue lstart lend ninputs vars
-    return $ (instrs >>= toSimpleInstr) ++ epilogueinstrs
+    return $ instrs ++ epilogueinstrs
 
 
 epilogue :: (Member (Writer [SimpInstr]) r) => Lbl -> Lbl -> Int -> [Var] -> Eff r ()

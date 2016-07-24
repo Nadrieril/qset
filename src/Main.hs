@@ -8,6 +8,7 @@ import qualified Data.IntMap.Strict as IM
 
 import QSet
 import Eval
+import Optimize
 
 
 main :: IO ()
@@ -19,31 +20,45 @@ main = do
     -- let testcases = [[397, 397, 5]]
     let testcases = [[3, 7, 5], [29, 47, 5], [37, 43, 11], [5, 13, 17], [37, 5, 11], [37, 37, 11], [7, 17, 7], [3, 3, 3]]
     -- let prog = faster 6 $ rsa "i0" "i1" "i2" "o0"
-    let prog = rsa "i0" "i1" "i2" "o0"
+    -- let prog = rsa "i0" "i1" "i2" "o0"
+    let prog = do
+            lstart <- getLabel
+            ifz "i0"
+                (incr "o1")
+                $ do
+                    decr "i0"
+                    [] >>> ["o0"]
+                    goto lstart
 
     let doProfile = False
-    let doTest = Just 1
+    -- let doTest = Just 1
+    let doTest = Nothing
     let doCompile = False
 
 
 
-    let instrs = runBlk 5 prog
+    let out@(instrs, _, lstart, lend) = runBlk prog
+    let optinstrs = optimize lstart lend instrs
+    let simpinstrs = compileOptimized 5 out
 
     if doProfile
         then do
-            let prof = profile instrs testcases
-            forM_ (zip [0..] instrs) $ \(linei, line) -> do
+            let prof = profile simpinstrs testcases
+            forM_ (zip [0..] simpinstrs) $ \(linei, line) -> do
                 let percentSteps = fromMaybe 0 $ IM.lookup linei prof
                 putStrLn $ printf "% 3d. %s   # %.2f%%" linei (show line) (100 * percentSteps)
-        else forM_ instrs print
+        else do
+            forM_ (toSimpleInstr =<< instrs) print
+            putStrLn ""
+            forM_ optinstrs print
     putStrLn ""
 
     when doCompile $ do
-        putStrLn $ compile instrs
+        putStrLn $ toQsetCode simpinstrs
         putStrLn ""
 
     when (isJust doTest) $ do
-        let (_, steps, finalState) = evalProg instrs $ testcases !! fromJust doTest
+        let (_, steps, finalState) = evalProg simpinstrs $ testcases !! fromJust doTest
         print (finalState, steps)
 
 
