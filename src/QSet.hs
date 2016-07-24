@@ -4,17 +4,15 @@ module QSet (
             , Lbl
             , Instr(..)
             , Blk
-            , (>>>)
-            , (|->)
+            , loop
+            , ifz
+            , goto
+            , transition
             , pattern (:->)
             , toSimpleInstr
             , comment
-            , newLabel
             , newVar
             , getLabel
-            , setLabel
-            , changeLabel
-            , changeToNewLabel
             , faster
             , runBlk
             , compile
@@ -120,12 +118,15 @@ runBlk ninputs b = run $
 tellOne :: (Typeable w, Member (Writer [w]) r) => w -> Eff r ()
 tellOne = tell . (:[])
 
+tellOneB :: Instr -> Blk r ()
+tellOneB i = lift $ tellOne i
+
 censorB :: ([Instr] -> [Instr]) -> Blk r a -> Blk r a
 censorB f b = Blk $ censor f . unBlk b
 
 
 comment :: String -> Blk r ()
-comment s = lift $ tellOne $ Comment s
+comment s = tellOneB $ Comment s
 
 newLabelM :: M r Var
 newLabelM = do
@@ -153,33 +154,46 @@ setLabel :: Var -> Blk r ()
 setLabel lend = Blk $ \_ -> return (lend, ())
 
 
-changeLabel :: Lbl -> Blk r ()
-changeLabel lend = do
-    lbl <- getLabel
-    () <- lift $ tellOne $ LbldInstr lbl [] lend []
-    setLabel lend
 
-changeToNewLabel :: Blk r ()
-changeToNewLabel = newLabel >>= changeLabel
-
-(>>>) :: [Var] -> [Var] -> Blk r ()
-(>>>) l r = do
+transition :: [Var] -> [Var] -> Blk r ()
+transition l r = do
     lstart <- getLabel
     lend <- newLabel
-    () <- lift $ tellOne $ if null l
-        then LbldInstr lstart l lstart r
+    tellOneB $ if null l
+        then LbldInstr lstart [] lend r
+        else ForkInstr lstart l lend r lend
+    setLabel lend
+
+loop :: [Var] -> [Var] -> Blk r ()
+loop l r = do
+    lstart <- getLabel
+    lend <- newLabel
+    tellOneB $ if null l
+        then LbldInstr lstart [] lstart r
         else ForkInstr lstart l lstart r lend
     setLabel lend
 
-(|->) :: Blk r () -> Var -> Blk r ()
-(|->) b lbl = do
-    clbl <- getLabel
-    censorB (map $ \case
-            Comment s -> Comment s
-            SimpInstr l r -> LbldInstr clbl l lbl r
-            LbldInstr l1 l _ r -> LbldInstr l1 l lbl r
-            ForkInstr l1 l _ r l3 -> ForkInstr l1 l lbl r l3
-        ) b
+goto :: Lbl -> Blk r ()
+goto lend = do
+    lstart <- getLabel
+    tellOneB $ LbldInstr lstart [] lend []
+    setLabel lend
+
+ifz :: Var -> Blk r () -> Blk r () -> Blk r ()
+ifz x b1 b2 = do
+    lstart <- getLabel
+    lbl1 <- newLabel
+    lbl2 <- newLabel
+    lend <- newLabel
+    tellOneB $ ForkInstr lstart [x] lbl2 [x] lbl1
+
+    setLabel lbl1
+    b1 >> goto lend
+
+    setLabel lbl2
+    b2 >> goto lend
+
+    setLabel lend
 
 
 faster :: Int -> Blk r a -> Blk r a

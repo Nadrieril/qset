@@ -12,13 +12,14 @@ import Eval
 
 main :: IO ()
 main = do
-    let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
-    let prog = prod "i0" "i1" "o0"
-    -- let testcases = [[12*12], [2*2], [10*10], [15*15]]
+    -- let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
+    -- let prog = prod "i0" "i1" "o0"
+    -- let testcases = [[2*2], [12*12], [10*10], [15*15]]
     -- let prog = sqrt_ "i0" "o0"
     -- let testcases = [[397, 397, 5]]
-    -- let testcases = [[3, 7, 5], [29, 47, 5], [37, 43, 11], [5, 13, 17], [37, 5, 11], [37, 37, 11], [7, 17, 7], [3, 3, 3]]
+    let testcases = [[3, 7, 5], [29, 47, 5], [37, 43, 11], [5, 13, 17], [37, 5, 11], [37, 37, 11], [7, 17, 7], [3, 3, 3]]
     -- let prog = faster 6 $ rsa "i0" "i1" "i2" "o0"
+    let prog = rsa "i0" "i1" "i2" "o0"
 
     let doProfile = False
     let doTest = Just 1
@@ -57,27 +58,10 @@ profile prog testcases =
     in profFrac
 
 
-goto :: Lbl -> Blk r ()
-goto lend = [] >>> [] |-> lend
 
-ifz :: Var -> Blk r () -> Blk r () -> Blk r ()
-ifz x b1 b2 = do
-    comment $ printf "ifz %s" x
-    lbl1 <- newLabel
-    lbl2 <- newLabel
-    lend <- newLabel
-    [x] >>> [x] |-> lbl2
-    goto lbl1
+(>>>) = transition
 
-    setLabel lbl1
-    b1
-    goto lend
-
-    setLabel lbl2
-    b2
-    goto lend
-
-    setLabel lend
+(>=>) = loop
 
 whennz :: Var -> Blk r () -> Blk r ()
 whennz x = ifz x (return ())
@@ -95,12 +79,12 @@ whilenz x b = do
 clear :: Var -> Blk r ()
 clear x = do
     comment $ printf "clear %s" x
-    [x] >>> []
+    [x] >=> []
 
 move :: Var -> Var -> Blk r ()
 move x y = do
     comment $ printf "move %s %s" x y
-    [x] >>> [y]
+    [x] >=> [y]
 
 swap :: Var -> Var -> Blk r ()
 swap x y = do
@@ -114,23 +98,18 @@ copy :: Var -> [Var] -> Blk r ()
 copy x ys = do
     comment $ printf "copy %s %s" x (show ys)
     tmp <- newVar "cp"
-    [x] >>> (tmp:ys)
+    [x] >=> (tmp:ys)
     move tmp x
 
 incr :: Var -> Blk r ()
 incr x = do
     comment $ printf "incr %s" x
-    lend <- newLabel
-    [] >>> [x] |-> lend
-    setLabel lend
+    [] >>> [x]
 
 decr :: Var -> Blk r ()
 decr x = do
     comment $ printf "decr %s" x
-    lend <- newLabel
-    [x] >>> [] |-> lend
-    goto lend
-    setLabel lend
+    [x] >>> []
 
 add :: Var -> Var -> Var -> Blk r ()
 add x y z = do
@@ -141,7 +120,7 @@ add x y z = do
 sub :: Var -> Var -> Blk r ()
 sub x y = do
     comment $ printf "sub %s %s" x y
-    [x, y] >>> []
+    [x, y] >=> []
 
 prod :: Var -> Var -> Var -> Blk r ()
 prod x y z = do
@@ -153,14 +132,14 @@ prod x y z = do
 euclDiv :: Var -> Var -> Var -> Var -> Blk r ()
 euclDiv a b q r = whennz b $ do
     lstart <- getLabel
-    [a, b] >>> [r]
-    ifz a
-        (whenz b $ do
-            incr q
-            clear r)
-        (do incr q
-            move r b
-            goto lstart)
+    [a, b] >=> [r]
+    whennz a $ do
+        incr q
+        move r b
+        goto lstart
+    whenz b $ do
+        incr q
+        clear r
 
 sqrt_ :: Var -> Var -> Blk r ()
 sqrt_ x r = do
@@ -184,8 +163,8 @@ submod x y n = do
     sub x y
     whilenz y $ do
         clear x
-        [n, y] >>> [tmp]
-        [n] >>> [tmp, x]
+        [n, y] >=> [tmp]
+        [n] >=> [tmp, x]
         move tmp n
 
 
