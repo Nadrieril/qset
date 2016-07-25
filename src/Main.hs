@@ -20,33 +20,21 @@ main = do
     -- let testcases = [[397, 397, 5]]
     let testcases = [[3, 7, 5], [29, 47, 5], [37, 43, 11], [5, 13, 17], [37, 5, 11], [37, 37, 11], [7, 17, 7], [3, 3, 3]]
     -- let prog = faster 6 $ rsa "i0" "i1" "i2" "o0"
-    -- let prog = rsa "i0" "i1" "i2" "o0"
-    let prog = do
-            l1 <- getLabel
-            ifz "x"
-                (incr "a")
-                (do
-                    decr "x"
-                    incr "y"
-                    goto l1)
-            l2 <- getLabel
-            ifz "y"
-                (incr "a")
-                (do
-                    decr "y"
-                    incr "z"
-                    goto l2)
+    let prog = rsa "i0" "i1" "i2" "o0"
+    -- let prog = do
+    --         swap "a" "b"
 
     let doProfile = False
-    -- let doTest = Just 1
-    let doTest = Nothing
+    let doTest = Just 1
+    -- let doTest = Nothing
     let doCompile = False
 
 
 
-    let out@(instrs, _, lstart, lend) = runBlk prog
+    let out@(instrs, vars, lstart, lend) = runBlk prog
     let optinstrs = optimize lstart lend instrs
-    let simpinstrs = compileOptimized 5 out
+    let simpinstrs = compile 5 (instrs >>= toSimpleInstr, vars, lstart, lend)
+    let simpoptinstrs = compileOptimized 5 out
 
     if doProfile
         then do
@@ -55,8 +43,8 @@ main = do
                 let percentSteps = fromMaybe 0 $ IM.lookup linei prof
                 putStrLn $ printf "% 3d. %s   # %.2f%%" linei (show line) (100 * percentSteps)
         else do
-            forM_ (toSimpleInstr =<< instrs) print
-            putStrLn ""
+            -- forM_ (toSimpleInstr =<< instrs) print
+            -- putStrLn ""
             forM_ optinstrs print
     putStrLn ""
 
@@ -65,7 +53,7 @@ main = do
         putStrLn ""
 
     when (isJust doTest) $ do
-        let (_, steps, finalState) = evalProg simpinstrs $ testcases !! fromJust doTest
+        let (_, steps, finalState) = evalProg simpoptinstrs $ testcases !! fromJust doTest
         print (finalState, steps)
 
 
