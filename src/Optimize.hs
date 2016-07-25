@@ -1,12 +1,13 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, LambdaCase, ViewPatterns #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, LambdaCase, ViewPatterns, TypeOperators #-}
 module Optimize where
 
 import Data.Maybe
-import qualified Data.IntMap.Strict as M
 import Control.Monad
-import Control.Eff (Member, Eff, run)
+import Control.Eff (Member, Eff, run, (:>))
 import Control.Eff.Reader.Strict (Reader, ask, runReader)
 import Control.Eff.State.Strict (State, get, put, modify, evalState)
+import qualified Data.IntMap.Strict as M
+import qualified Data.IntSet as IS
 import qualified Data.MultiSet as MS
 
 import QSet
@@ -20,8 +21,8 @@ data Node =
     | Branch Pat Target Target
 
 data GNode = GNode {
-      node :: Node
-    , visited :: Bool
+      gvertex :: Vertex
+    , gnode :: Node
 }
 
 type Graph = M.IntMap GNode
@@ -50,11 +51,11 @@ newNode :: Vertex -> Node -> G r ()
 newNode v node = do
     graph <- get
     when (isJust $ M.lookup v graph) $ error $ "Duplicate label: " ++ show v
-    put $ M.insert v (GNode node False) graph
+    put $ M.insert v (GNode v node) graph
 
 deconstructGraph :: Graph -> [SimpInstr]
 deconstructGraph g = uncurry nodeToInstr =<< M.toList g
-    where nodeToInstr v1 (node -> n) = case n of
+    where nodeToInstr v1 (gnode -> n) = case n of
             Go (y, v2) -> [LbldInstr (vertexToLbl v1) [] (vertexToLbl v2) (MS.elems y)]
             Branch x (y, v2) (z, v3) ->
                 [ LbldInstr (vertexToLbl v1) (MS.elems x) (vertexToLbl v2) (MS.elems y),
@@ -82,35 +83,46 @@ getNode lbl = do
     return $ lbl `M.lookup` graph
 
 
+dfsDo :: forall r. (GNode -> G (State IS.IntSet :> r) ()) -> G r ()
+dfsDo action = do
+    (vstart, _::Vertex) <- ask
+    evalState IS.empty $ dfsDoAt vstart
+
+    where
+        dfsDoAt :: Vertex -> G (State IS.IntSet :> r) ()
+        dfsDoAt v = do
+            visited <- get
+            mnode <- getNode v
+            unless (v `IS.member` visited || null mnode) $ do
+                modify $ IS.insert v
+                let Just n = mnode
+                case gnode n of
+                    Go (_, v1) ->
+                        dfsDoAt v1
+                    Branch _ (_, v1) (_, v2) -> do
+                        dfsDoAt v1
+                        dfsDoAt v2
+                action n
+
+
 pathCompress :: G r ()
-pathCompress = do
-    (lstart, _::Vertex) <- ask
-    pathCompressAt lstart
+pathCompress = dfsDo $ \(GNode v node) ->
+    modify . M.insert v . GNode v =<< case node of
+        Go t1@(_, v1) -> do
+            n1 <- getNode v1
+            let t1' = fromMaybe t1 (compress t1 =<< n1)
+            return $ Go t1'
 
-pathCompressAt :: Vertex -> G r ()
-pathCompressAt lbl = getNode lbl >>= \case
-    Nothing -> return ()
-    Just GNode{ visited = True } -> return ()
-    Just (gn@GNode{ node = node }) -> do
-        modify $ M.insert lbl (gn { visited = True })
-        nnode <- case node of
-            Go t1@(_, v1) -> do
-                pathCompressAt v1
-                n1 <- getNode v1
-                let t1' = fromMaybe t1 (compress t1 =<< n1)
-                return $ Go t1'
-            Branch x t1@(_, v1) t2@(_, v2) -> do
-                pathCompressAt v1
-                pathCompressAt v2
-                n1 <- getNode v1
-                n2 <- getNode v2
-                let t1' = fromMaybe t1 (compress t1 =<< n1)
-                let t2' = fromMaybe t2 (compress t2 =<< n2)
-                return $ Branch x t1' t2'
+        Branch x t1@(_, v1) t2@(_, v2) -> do
+            n1 <- getNode v1
+            n2 <- getNode v2
+            let t1' = fromMaybe t1 (compress t1 =<< n1)
+            let t2' = fromMaybe t2 (compress t2 =<< n2)
+            return $ Branch x t1' t2'
 
-        modify $ M.insert lbl (gn { node = nnode, visited = True })
-
-    where compress (pat, _) = (. node) $ \case
+    where
+        compress :: Target -> GNode -> Maybe Target
+        compress (pat, _) (gnode -> n) = case n of
             Go (y, v1) -> Just (pat `MS.union` y, v1)
             Branch x (y, v1) _  | x `MS.isSubsetOf` pat -> Just ((pat `MS.difference` x) `MS.union` y, v1)
             _ -> Nothing
