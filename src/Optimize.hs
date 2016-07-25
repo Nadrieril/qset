@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, LambdaCase, ViewPatterns, TypeOperators #-}
+{-# LANGUAGE RankNTypes, FlexibleContexts, ScopedTypeVariables, LambdaCase, ViewPatterns, TypeOperators, DeriveFunctor, DeriveFoldable, DeriveTraversable, TupleSections #-}
 module Optimize where
 
 import Data.Maybe
@@ -15,7 +15,7 @@ import QSet
 
 type Vertex = Int
 type Pat = MS.MultiSet Var
-type Target = (Pat, Vertex)
+type Target a = (Pat, a)
 
 lblToVertex :: Lbl -> Vertex
 lblToVertex ('l':n) = read n
@@ -25,19 +25,20 @@ vertexToLbl :: Vertex -> Lbl
 vertexToLbl = ('l':) . show
 
 
-data Node =
-      Go Target
-    | Branch Pat Target Target
+data Node a =
+      Go a
+    | Branch Pat a a
+    deriving (Functor, Foldable, Traversable)
 
-data GNode = GNode {
+data GNode a = GNode {
       gvertex :: Vertex
-    , gnode :: Node
-}
+    , gnode :: Node (Target a)
+} deriving (Functor, Foldable, Traversable)
 
-type Graph = M.IntMap GNode
+type Graph = M.IntMap (GNode Vertex)
 
 
-insertNode :: Vertex -> Node -> Graph -> Graph
+insertNode :: Vertex -> Node (Target Vertex) -> Graph -> Graph
 insertNode v node graph =
     if isJust $ M.lookup v graph
         then error $ "Duplicate label: " ++ show v
@@ -53,7 +54,7 @@ constructInstrGraph = flip foldr M.empty $ \i g ->
         ForkInstr (lblToVertex -> v1) x (lblToVertex -> v2) y (lblToVertex -> v3) ->
             insert v1 $ Branch (MS.fromList x) (MS.fromList y, v2) (MS.empty, v3)
 
-nodeToInstrs :: GNode -> [SimpInstr]
+nodeToInstrs :: GNode Vertex -> [SimpInstr]
 nodeToInstrs (GNode v1 n) = case n of
         Go (y, v2) ->
             [ LbldInstr (vertexToLbl v1) [] (vertexToLbl v2) (MS.elems y) ]
@@ -67,7 +68,7 @@ type G r e =
     , Member (Reader (Vertex, Vertex)) r
     ) => Eff r e
 
-getNode :: Vertex -> G r (Maybe GNode)
+getNode :: Vertex -> G r (Maybe (GNode Vertex))
 getNode v = do
     graph <- get
     return $ v `M.lookup` graph
@@ -78,7 +79,7 @@ optimize lstart lend instrs = run $
     flip runReader (lblToVertex lstart, lblToVertex lend) $
     evalState (constructInstrGraph instrs) $ do
         pathCompress
-        nodes <- reachable
+        nodes <- reverse <$> reachable
         return $ nodeToInstrs =<< nodes
 
 compileOptimized :: Int -> ([Instr], [Var], Lbl, Lbl) -> [SimpInstr]
@@ -87,54 +88,52 @@ compileOptimized ninputs (instrs, vars, lstart, lend) =
 
 
 
+dfsFold :: a -> (GNode (Vertex, a) -> G (State IS.IntSet :> r) a) -> G r a
+dfsFold dft action = do
+    (vstart, _::Vertex) <- ask
+    dfsFoldAt vstart dft action
 
-dfsDo :: forall r. (GNode -> G (State IS.IntSet :> r) ()) -> G r ()
+dfsFoldAt :: forall r a. Vertex -> a -> (GNode (Vertex, a) -> G (State IS.IntSet :> r) a) -> G r a
+dfsFoldAt v dft action = snd <$> evalState IS.empty (dfsFoldAux v)
+    where
+        dfsFoldAux :: Vertex -> G (State IS.IntSet :> r) (Vertex, a)
+        dfsFoldAux v = (v,) <$> do
+            visited <- get
+            getNode v >>= \case
+                Nothing -> return dft
+                _ | v `IS.member` visited -> return dft
+                Just n -> do
+                    modify $ IS.insert v
+                    action =<< traverse dfsFoldAux n
+
+dfsDo :: (GNode Vertex -> G (State IS.IntSet :> r) ()) -> G r ()
 dfsDo action = do
     (vstart, _::Vertex) <- ask
     dfsDoAt vstart action
 
-dfsDoAt :: forall r. Vertex -> (GNode -> G (State IS.IntSet :> r) ()) -> G r ()
-dfsDoAt v action = evalState IS.empty $ dfsDoAux v
-    where
-        dfsDoAux :: Vertex -> G (State IS.IntSet :> r) ()
-        dfsDoAux v = do
-            visited <- get
-            mnode <- getNode v
-            unless (v `IS.member` visited || null mnode) $ do
-                modify $ IS.insert v
-                let Just n = mnode
-                case gnode n of
-                    Go (_, v1) ->
-                        dfsDoAux v1
-                    Branch _ (_, v1) (_, v2) -> do
-                        dfsDoAux v1
-                        dfsDoAux v2
-                action n
+dfsDoAt :: Vertex -> (GNode Vertex -> G (State IS.IntSet :> r) ()) -> G r ()
+dfsDoAt v action = dfsFoldAt v () (action . fmap fst)
 
 
-reachable :: G r [GNode]
+
+
+reachable :: G r [GNode Vertex]
 reachable = fst <$> runMonoidWriter (dfsDo tellOne)
     where tellOne = tell . (:[])
 
 
 pathCompress :: G r ()
-pathCompress = dfsDo $ \(GNode v node) ->
-    modify . M.insert v . GNode v =<< case node of
-        Go t1@(_, v1) -> do
-            n1 <- getNode v1
-            let t1' = fromMaybe t1 (compress t1 =<< n1)
-            return $ Go t1'
-
-        Branch x t1@(_, v1) t2@(_, v2) -> do
-            n1 <- getNode v1
-            n2 <- getNode v2
-            let t1' = fromMaybe t1 (compress t1 =<< n1)
-            let t2' = fromMaybe t2 (compress t2 =<< n2)
-            return $ Branch x t1' t2'
+pathCompress = void $ dfsFold Nothing $ \(GNode v node) -> do
+    let gnode' = GNode v $ fmap f node
+    modify $ M.insert v gnode'
+    return $ Just gnode'
 
     where
-        compress :: Target -> GNode -> Maybe Target
-        compress (pat, _) (gnode -> n) = case n of
+        f :: Target (a, Maybe (GNode a)) -> Target a
+        f (p, (v, n)) = fromMaybe (p, v) (compress p =<< n)
+
+        compress :: Pat -> GNode a -> Maybe (Target a)
+        compress pat (gnode -> n) = case n of
             Go (y, v1) -> Just (pat `MS.union` y, v1)
             Branch x (y, v1) _  | x `MS.isSubsetOf` pat -> Just ((pat `MS.difference` x) `MS.union` y, v1)
             _ -> Nothing

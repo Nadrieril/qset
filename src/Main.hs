@@ -22,13 +22,20 @@ main = do
     -- let prog = faster 6 $ rsa "i0" "i1" "i2" "o0"
     -- let prog = rsa "i0" "i1" "i2" "o0"
     let prog = do
-            lstart <- getLabel
-            ifz "i0"
-                (incr "o1")
-                $ do
-                    decr "i0"
-                    [] >>> ["o0"]
-                    goto lstart
+            l1 <- getLabel
+            ifz "x"
+                (incr "a")
+                (do
+                    decr "x"
+                    incr "y"
+                    goto l1)
+            l2 <- getLabel
+            ifz "y"
+                (incr "a")
+                (do
+                    decr "y"
+                    incr "z"
+                    goto l2)
 
     let doProfile = False
     -- let doTest = Just 1
