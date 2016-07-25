@@ -5,7 +5,8 @@ import Data.Maybe
 import Control.Monad
 import Control.Eff (Member, Eff, run, (:>))
 import Control.Eff.Reader.Strict (Reader, ask, runReader)
-import Control.Eff.State.Strict (State, get, modify, evalState, execState)
+import Control.Eff.State.Strict (State, get, modify, evalState)
+import Control.Eff.Writer.Strict (tell, runMonoidWriter)
 import qualified Data.IntMap.Strict as M
 import qualified Data.IntSet as IS
 import qualified Data.MultiSet as MS
@@ -52,14 +53,13 @@ constructInstrGraph = flip foldr M.empty $ \i g ->
         ForkInstr (lblToVertex -> v1) x (lblToVertex -> v2) y (lblToVertex -> v3) ->
             insert v1 $ Branch (MS.fromList x) (MS.fromList y, v2) (MS.empty, v3)
 
-deconstructGraph :: Graph -> [SimpInstr]
-deconstructGraph g = uncurry nodeToInstr =<< M.toList g
-    where nodeToInstr v1 (gnode -> n) = case n of
-            Go (y, v2) ->
-                [ LbldInstr (vertexToLbl v1) [] (vertexToLbl v2) (MS.elems y) ]
-            Branch x (y, v2) (z, v3) ->
-                [ LbldInstr (vertexToLbl v1) (MS.elems x) (vertexToLbl v2) (MS.elems y)
-                , LbldInstr (vertexToLbl v1) [] (vertexToLbl v3) (MS.elems z) ]
+nodeToInstrs :: GNode -> [SimpInstr]
+nodeToInstrs (GNode v1 n) = case n of
+        Go (y, v2) ->
+            [ LbldInstr (vertexToLbl v1) [] (vertexToLbl v2) (MS.elems y) ]
+        Branch x (y, v2) (z, v3) ->
+            [ LbldInstr (vertexToLbl v1) (MS.elems x) (vertexToLbl v2) (MS.elems y)
+            , LbldInstr (vertexToLbl v1) [] (vertexToLbl v3) (MS.elems z) ]
 
 
 type G r e =
@@ -74,11 +74,12 @@ getNode v = do
 
 
 optimize :: Lbl -> Lbl -> [Instr] -> [SimpInstr]
-optimize lstart lend instrs =
-    deconstructGraph $ run $
+optimize lstart lend instrs = run $
     flip runReader (lblToVertex lstart, lblToVertex lend) $
-    execState (constructInstrGraph instrs)
+    evalState (constructInstrGraph instrs) $ do
         pathCompress
+        nodes <- reachable
+        return $ nodeToInstrs =<< nodes
 
 compileOptimized :: Int -> ([Instr], [Var], Lbl, Lbl) -> [SimpInstr]
 compileOptimized ninputs (instrs, vars, lstart, lend) =
@@ -90,10 +91,13 @@ compileOptimized ninputs (instrs, vars, lstart, lend) =
 dfsDo :: forall r. (GNode -> G (State IS.IntSet :> r) ()) -> G r ()
 dfsDo action = do
     (vstart, _::Vertex) <- ask
-    evalState IS.empty $ dfsDoAt vstart
+    dfsDoAt vstart action
+
+dfsDoAt :: forall r. Vertex -> (GNode -> G (State IS.IntSet :> r) ()) -> G r ()
+dfsDoAt v action = evalState IS.empty $ dfsDoAux v
     where
-        dfsDoAt :: Vertex -> G (State IS.IntSet :> r) ()
-        dfsDoAt v = do
+        dfsDoAux :: Vertex -> G (State IS.IntSet :> r) ()
+        dfsDoAux v = do
             visited <- get
             mnode <- getNode v
             unless (v `IS.member` visited || null mnode) $ do
@@ -101,11 +105,16 @@ dfsDo action = do
                 let Just n = mnode
                 case gnode n of
                     Go (_, v1) ->
-                        dfsDoAt v1
+                        dfsDoAux v1
                     Branch _ (_, v1) (_, v2) -> do
-                        dfsDoAt v1
-                        dfsDoAt v2
+                        dfsDoAux v1
+                        dfsDoAux v2
                 action n
+
+
+reachable :: G r [GNode]
+reachable = fst <$> runMonoidWriter (dfsDo tellOne)
+    where tellOne = tell . (:[])
 
 
 pathCompress :: G r ()
