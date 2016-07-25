@@ -15,7 +15,7 @@ main :: IO ()
 main = do
     -- let testcases = [[3, 4], [100, 20], [20, 100], [150, 150], [397, 397]]
     -- let prog = prod "i0" "i1" "o0"
-    -- let testcases = [[2*2], [12*12], [10*10], [15*15]]
+    -- let testcases = [[2*2], [15*15], [10*10], [12*12]]
     -- let prog = sqrt_ "i0" "o0"
     -- let testcases = [[397, 397, 5]]
     let testcases = [[3, 7, 5], [29, 47, 5], [37, 43, 11], [5, 13, 17], [37, 5, 11], [37, 37, 11], [7, 17, 7], [3, 3, 3]]
@@ -38,13 +38,13 @@ main = do
 
     if doProfile
         then do
-            let prof = profile simpinstrs testcases
-            forM_ (zip [0..] simpinstrs) $ \(linei, line) -> do
+            let prof = profile simpoptinstrs testcases
+            forM_ (zip [0..] simpoptinstrs) $ \(linei, line) -> do
                 let percentSteps = fromMaybe 0 $ IM.lookup linei prof
                 putStrLn $ printf "% 3d. %s   # %.2f%%" linei (show line) (100 * percentSteps)
         else do
-            -- forM_ (toSimpleInstr =<< instrs) print
-            -- putStrLn ""
+            forM_ (toSimpleInstr =<< instrs) print
+            putStrLn ""
             forM_ optinstrs print
     putStrLn ""
 
@@ -157,15 +157,14 @@ sqrt_ x r = do
     z <- newVar "z"
     incr t
     incr x
-    lstart <- getLabel
-    sub x z
-    whennz x $ do
-        incr t
+    whilenz x $ do
         incr r
         copy t [z]
         incr t
-        decr x
-        goto lstart
+        incr t
+        incr z
+        incr z
+        sub x z
 
 
 submod :: Var -> Var -> Var -> Blk r ()

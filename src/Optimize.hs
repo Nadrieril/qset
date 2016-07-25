@@ -66,6 +66,7 @@ nodeToInstrs (GNode v1 n) = case n of
 
 type G r e =
     ( Member (State Graph) r
+    , Member (State Vertex) r
     , Member (Reader (Vertex, Vertex)) r
     ) => Eff r e
 
@@ -74,11 +75,21 @@ getNode v = do
     graph <- get
     return $ v `IM.lookup` graph
 
+newVertex :: G r Vertex
+newVertex = do
+    modify (+(1::Vertex))
+    get
+
+insertNodeM :: Vertex -> Node (Target Vertex) -> G r ()
+insertNodeM v n = modify $ insertNode v n
 
 optimize :: Lbl -> Lbl -> [Instr] -> [SimpInstr]
-optimize lstart lend instrs = run $
+optimize lstart lend instrs =
+    let graph = constructInstrGraph instrs in
+    run $
     flip runReader (lblToVertex lstart, lblToVertex lend) $
-    evalState (constructInstrGraph instrs) $ do
+    evalState (fst $ IM.findMax graph) $
+    evalState graph $ do
         pathCompress
         loopFusion
         nodes <- reverse <$> reachable
@@ -149,12 +160,20 @@ loopFusion = void $ dfsFold [] $ \(GNode v node) -> do
 
     node <- case node of
         Go (x, (v1, m1)) -> do
-            x <- return $ fusion MS.empty x m1
+            (_, x) <- return $ fusion False MS.empty x m1
             return $ Go (x, (v1, m1))
         Branch x (y, (v1, m1)) (z, (v2, m2)) -> do
-            y <- return $ fusion x y m1
-            z <- return $ fusion MS.empty z m2
-            return $ Branch x (y, (v1, m1)) (z, (v2, m2))
+            (_, y) <- return $ fusion False x y m1
+            (_, z) <- return $ fusion False MS.empty z m2
+            if v1 == v then do
+                (x', y') <- return $ superFusion x y m1
+                if x == x'
+                    then return $ Branch x (y', (v1, m1)) (z, (v2, m2))
+                    else do
+                        v' <- newVertex
+                        insertNodeM v' $ Branch x (y, v') (z, v2)
+                        return $ Branch x' (y', (v1, m1)) (z, (v', m2))
+            else return $ Branch x (y, (v1, m1)) (z, (v2, m2))
 
 
     modify $ IM.insert v $ GNode v $ fmap (fmap fst) node
@@ -170,15 +189,29 @@ loopFusion = void $ dfsFold [] $ \(GNode v node) -> do
                          && null (MS.intersection x tgt)
                          && null (MS.intersection y src)
                         )
-        _ -> []
+        Branch _ (_, (_, m1)) (_, (_, m2)) ->
+            m1 `intersect` m2
 
     where
-        fusion :: Pat -> Pat -> [(Pat, Pat)] -> Pat
-        fusion sink pat m = loop pat
+        superFusion = fusion True
+        fusion :: Bool -> Pat -> Pat -> [(Pat, Pat)] -> (Pat, Pat)
+        fusion super sink pat m = loop (sink, pat)
             where
-                loop :: Pat -> Pat
-                loop pat = maybe pat (loop . replace pat) $ find (canReplace pat) m
-                canReplace :: Pat -> (Pat, Pat) -> Bool
-                canReplace pat (src, tgt) = src `MS.isSubsetOf` pat && null (sink `MS.intersection` tgt)
-                replace :: Pat -> (Pat, Pat) -> Pat
-                replace pat (src, tgt) = (pat `MS.difference` src) `MS.union` tgt
+                loop :: (Pat, Pat) -> (Pat, Pat)
+                loop (sink, pat) =
+                    let nonConflicts = filter (not . conflicts (sink, pat)) m in
+                    case find (canReplace (sink, pat)) nonConflicts of
+                        Just (src, tgt) -> loop $ replace (sink, pat) (src, tgt)
+                        Nothing | not super -> (sink, pat)
+                        Nothing -> case find (canReplacePartial (sink, pat)) nonConflicts of
+                            Nothing -> (sink, pat)
+                            Just (src, tgt) -> loop $ replace (sink, pat) (src, tgt)
+
+                conflicts (sink, _) (_, tgt) = not $ null $ sink `MS.intersection` tgt
+                canReplace (_, pat) (src, _) = src `MS.isSubsetOf` pat
+                canReplacePartial (_, pat) (src, _) = not (null (src `MS.intersection` pat))
+
+                replace :: (Pat, Pat) -> (Pat, Pat) -> (Pat, Pat)
+                replace (sink, pat) (src, tgt) =
+                    ( sink `MS.union` (src `MS.difference` pat)
+                    , tgt `MS.union` (pat `MS.difference` src) )
